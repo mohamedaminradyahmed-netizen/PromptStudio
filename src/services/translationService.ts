@@ -9,89 +9,9 @@ export const SUPPORTED_LANGUAGES: LanguageInfo[] = [
   { code: 'zh', name: 'Chinese', nativeName: '中文', direction: 'ltr', flag: '🇨🇳' },
 ];
 
-// Simulated translation dictionary for demo purposes
-const translations: Record<string, Record<Language, string>> = {
-  'hello': {
-    ar: 'مرحباً',
-    en: 'Hello',
-    es: 'Hola',
-    fr: 'Bonjour',
-    de: 'Hallo',
-    zh: '你好',
-  },
-  'welcome': {
-    ar: 'أهلاً وسهلاً',
-    en: 'Welcome',
-    es: 'Bienvenido',
-    fr: 'Bienvenue',
-    de: 'Willkommen',
-    zh: '欢迎',
-  },
-  'thank you': {
-    ar: 'شكراً لك',
-    en: 'Thank you',
-    es: 'Gracias',
-    fr: 'Merci',
-    de: 'Danke',
-    zh: '谢谢',
-  },
-  'good morning': {
-    ar: 'صباح الخير',
-    en: 'Good morning',
-    es: 'Buenos días',
-    fr: 'Bonjour',
-    de: 'Guten Morgen',
-    zh: '早上好',
-  },
-  'goodbye': {
-    ar: 'مع السلامة',
-    en: 'Goodbye',
-    es: 'Adiós',
-    fr: 'Au revoir',
-    de: 'Auf Wiedersehen',
-    zh: '再见',
-  },
-  'how are you': {
-    ar: 'كيف حالك؟',
-    en: 'How are you?',
-    es: '¿Cómo estás?',
-    fr: 'Comment allez-vous?',
-    de: 'Wie geht es dir?',
-    zh: '你好吗？',
-  },
-  'i love you': {
-    ar: 'أحبك',
-    en: 'I love you',
-    es: 'Te amo',
-    fr: 'Je t\'aime',
-    de: 'Ich liebe dich',
-    zh: '我爱你',
-  },
-  'please': {
-    ar: 'من فضلك',
-    en: 'Please',
-    es: 'Por favor',
-    fr: 'S\'il vous plaît',
-    de: 'Bitte',
-    zh: '请',
-  },
-  'yes': {
-    ar: 'نعم',
-    en: 'Yes',
-    es: 'Sí',
-    fr: 'Oui',
-    de: 'Ja',
-    zh: '是',
-  },
-  'no': {
-    ar: 'لا',
-    en: 'No',
-    es: 'No',
-    fr: 'Non',
-    de: 'Nein',
-    zh: '不',
-  },
-};
+
+import { LLMServiceAdapter } from './LLMServiceAdapter';
+import { cacheTranslation } from './translationCache';
 
 const culturalAdaptations: Record<Language, Record<string, string[]>> = {
   ar: {
@@ -130,23 +50,7 @@ function generateId(): string {
   return `trans_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-function findTranslation(text: string, sourceLang: Language, targetLang: Language): string | null {
-  const normalized = text.toLowerCase().trim();
 
-  // Check direct matches
-  if (translations[normalized]) {
-    return translations[normalized][targetLang];
-  }
-
-  // Check if source text matches any translation value
-  for (const [, langTexts] of Object.entries(translations)) {
-    if (langTexts[sourceLang]?.toLowerCase() === normalized) {
-      return langTexts[targetLang];
-    }
-  }
-
-  return null;
-}
 
 function transformWithCulturalContext(
   text: string,
@@ -171,22 +75,21 @@ function transformWithCulturalContext(
   return { text: transformedText, notes };
 }
 
-export async function translateText(
   sourceText: string,
   sourceLanguage: Language,
   targetLanguage: Language,
   culturalContext: CulturalContext
 ): Promise<TranslationResult> {
-  // Simulate API delay
-  await new Promise(resolve => setTimeout(resolve, 500 + Math.random() * 1000));
-
-  let translatedText = findTranslation(sourceText, sourceLanguage, targetLanguage);
-
-  // If no direct translation found, create a simulated translation
-  if (!translatedText) {
-    const langInfo = SUPPORTED_LANGUAGES.find(l => l.code === targetLanguage);
-    translatedText = `[${langInfo?.nativeName}] ${sourceText}`;
-  }
+  const apiKey = process.env.OPENAI_API_KEY || '';
+  const llm = new LLMServiceAdapter(apiKey);
+  const systemPrompt = `You are a professional localization assistant. Translate and localize the following text for ${targetLanguage} speakers. Consider cultural context: ${JSON.stringify(culturalContext)}.`;
+  const translatedText = await llm.translate({
+    prompt: sourceText,
+    sourceLanguage,
+    targetLanguage,
+    systemPrompt,
+    cache: cacheTranslation,
+  });
 
   const { text: adaptedText, notes } = transformWithCulturalContext(
     translatedText,
@@ -194,26 +97,15 @@ export async function translateText(
     culturalContext
   );
 
-  // Generate alternative translations
-  const alternatives: string[] = [];
-  if (culturalContext.formality === 'formal') {
-    alternatives.push(`(Formal) ${adaptedText}`);
-  }
-  if (culturalContext.formality === 'informal') {
-    alternatives.push(`(Casual) ${adaptedText}`);
-  }
-
-  const confidence = Math.random() * 0.2 + 0.8; // 80-100% confidence
-
   return {
     id: generateId(),
     sourceText,
     sourceLanguage,
     targetLanguage,
     translatedText: adaptedText,
-    alternativeTranslations: alternatives.length > 0 ? alternatives : undefined,
+    alternativeTranslations: undefined,
     culturalNotes: notes.length > 0 ? notes : undefined,
-    confidence,
+    confidence: 1.0,
     timestamp: new Date(),
     culturalContext,
     isCertified: false,
@@ -222,18 +114,16 @@ export async function translateText(
   };
 }
 
-export async function translateToMultipleLanguages(
   sourceText: string,
   sourceLanguage: Language,
   targetLanguages: Language[],
   culturalContext: CulturalContext
 ): Promise<TranslationResult[]> {
-  const results = await Promise.all(
+  return Promise.all(
     targetLanguages.map(targetLang =>
       translateText(sourceText, sourceLanguage, targetLang, culturalContext)
     )
   );
-  return results;
 }
 
 export function getLanguageInfo(code: Language): LanguageInfo | undefined {

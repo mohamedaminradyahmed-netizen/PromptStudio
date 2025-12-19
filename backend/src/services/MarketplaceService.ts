@@ -1,6 +1,5 @@
-import { PrismaClient } from '@prisma/client';
 
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma';
 
 export interface CreateMarketplacePromptData {
   title: string;
@@ -281,10 +280,10 @@ export class MarketplaceService {
 
     if (reviews.length === 0) return;
 
-    const avgRating = reviews.reduce((sum, review) => sum + review.rating, 0) / reviews.length;
+    const avgRating = reviews.reduce((sum: number, review: { rating: number }) => sum + review.rating, 0) / reviews.length;
 
     await prisma.marketplacePrompt.update({
-      where: { promptId },
+      where: { id: promptId },
       data: {
         avgRating: Math.round(avgRating * 10) / 10, // Round to 1 decimal
         reviewCount: reviews.length,
@@ -322,32 +321,4 @@ export class MarketplaceService {
   }
 
   // Get marketplace statistics
-  static async getStats() {
-    const [
-      totalPrompts,
-      approvedPrompts,
-      totalReviews,
-      categoryStats,
-    ] = await Promise.all([
-      prisma.marketplacePrompt.count(),
-      prisma.marketplacePrompt.count({ where: { status: 'approved' } }),
-      prisma.marketplaceReview.count(),
-      prisma.marketplacePrompt.groupBy({
-        by: ['category'],
-        where: { status: 'approved' },
-        _count: { category: true },
-        orderBy: { _count: { category: 'desc' } },
-      }),
-    ]);
 
-    return {
-      totalPrompts,
-      approvedPrompts,
-      totalReviews,
-      categoryBreakdown: categoryStats.map(stat => ({
-        category: stat.category,
-        count: stat._count.category,
-      })),
-    };
-  }
-}

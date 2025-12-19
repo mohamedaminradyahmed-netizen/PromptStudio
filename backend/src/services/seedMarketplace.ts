@@ -1,63 +1,15 @@
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma';
 
-const prisma = new PrismaClient();
-
+// Only use this script to seed the database with realistic initial data. No mock or dummy data in code.
 export async function seedMarketplace() {
-  console.log('🌱 Seeding marketplace prompts...');
-
-  const prompts = [
-    {
-      title: 'Midjourney Photorealism Parameters',
-      description: 'Advanced parameter combinations for generating photorealistic images with Midjourney, including lighting, composition, and style modifiers.',
-      content: `You are a professional photography director specializing in hyper-realistic image generation.
-
-## Task
-Generate Midjourney parameters for creating photorealistic images based on the following requirements.
-
-## Requirements
-- Subject: {{subject}}
-- Style: {{style}}
-- Lighting: {{lighting}}
-- Composition: {{composition}}
-- Quality Level: {{quality}}
-
-## Parameter Structure
---ar {{aspect_ratio}} --q {{quality}} --v {{version}} --s {{stylize}} {{additional_params}}
-
-## Essential Parameters for Photorealism
-- **--q 2** for higher quality
-- **--v 5** or **--v 6** for latest model
-- **--ar 16:9** or **--ar 3:2** for cinematic ratios
-- **--s 100-300** for balanced stylization
-- **--c 25-50** for more detailed results
-
-## Advanced Techniques
-- Use **--iw 1.5-2.5** for image weight
-- Add **--no text, watermark** to avoid unwanted elements
-- Include **highly detailed, photorealistic, 8k** in prompts
-- Use **sharp focus, professional photography** for technical quality
-
-## Output Format
-\`\`\`
-/imagine prompt: [Detailed scene description], [subject details], [style modifiers], [technical parameters] --ar 16:9 --q 2 --v 6 --s 250 --c 35
-\`\`\`
-
-## Example Variations
-- Portrait: "Professional headshot, 35mm lens, natural lighting, shallow depth of field"
-- Product: "Commercial product photography, clean background, dramatic lighting, macro details"
-- Architecture: "Photorealistic architectural visualization, golden hour lighting, detailed textures"`,
-      category: 'creative',
-      tags: ['midjourney', 'photorealism', 'ai-art', 'parameters', 'image-generation'],
-      modelRecommendation: 'midjourney-v6',
-      variables: [
-        { name: 'subject', description: 'Main subject of the image', default: 'professional portrait', type: 'text' },
-        { name: 'style', description: 'Artistic style', default: 'photorealistic', type: 'select', options: ['photorealistic', 'cinematic', 'commercial', 'artistic'] },
-        { name: 'lighting', description: 'Lighting setup', default: 'natural daylight', type: 'select', options: ['natural daylight', 'studio lighting', 'dramatic', 'golden hour'] },
-        { name: 'composition', description: 'Image composition', default: 'centered', type: 'select', options: ['centered', 'rule of thirds', 'dynamic', 'minimalist'] },
-        { name: 'quality', description: 'Quality level', default: 'high', type: 'select', options: ['standard', 'high', 'ultra'] },
-      ],
-      isFeatured: true,
-      isStaffPick: true,
+  // Example: Load data from a secure, external source or configuration file
+  // For production, replace this with a real data import or admin UI
+  // This function should be run only once during deployment or via CLI
+  // ...implementation for real data seeding goes here...
+  // e.g., read from a CSV, API, or admin input
+  // No hardcoded arrays or dummy data allowed
+  console.log('Seeding marketplace: Please implement real data import logic.');
+}
       status: 'approved',
       cloneCount: 1250,
       viewCount: 8900,
