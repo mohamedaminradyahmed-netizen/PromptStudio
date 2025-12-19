@@ -1,28 +1,35 @@
-import { PromptConfig, SDKGenerationOptions, GeneratedSDK } from '@/types';
-import { generatePythonSDK } from './python-generator';
-import { generateTypeScriptSDK } from './typescript-generator';
+
+import { generatePythonSDKTemplate } from './python-template';
+import { generateTypeScriptSDKTemplate } from './typescript-template';
 
 export function generateSDK(
   promptConfig: PromptConfig,
-  options: SDKGenerationOptions
+  options: SDKGenerationOptions & { language: 'python' | 'typescript' | 'curl' }
 ): GeneratedSDK {
   switch (options.language) {
     case 'python':
-      return generatePythonSDK(promptConfig, options);
+      return generatePythonSDKTemplate(promptConfig, options);
     case 'typescript':
-      return generateTypeScriptSDK(promptConfig, options);
+      return generateTypeScriptSDKTemplate(promptConfig, options);
+    case 'curl':
+      return {
+        language: 'curl',
+        code: `curl -X POST https://api.promptstudio.ai/v1/execute -H "Authorization: Bearer $API_KEY" -H "Content-Type: application/json" -d '{"prompt": "YOUR_PROMPT_HERE"}'`,
+        filename: 'promptstudio.sh',
+        dependencies: ['curl'],
+      };
     default:
       throw new Error(`Unsupported language: ${options.language}`);
   }
 }
 
-export function getDefaultSDKOptions(language: 'python' | 'typescript'): SDKGenerationOptions {
+export function getDefaultSDKOptions(language: 'python' | 'typescript' | 'curl'): SDKGenerationOptions & { language: 'python' | 'typescript' | 'curl' } {
   return {
     language,
     asyncMode: true,
     includeRetryLogic: true,
     includeErrorHandling: true,
-    functionName: 'generate_response',
+    functionName: language === 'python' ? 'generate_response' : 'generateResponse',
     className: 'PromptClient',
     includeTypes: true,
     includeDocstrings: true,
@@ -31,6 +38,3 @@ export function getDefaultSDKOptions(language: 'python' | 'typescript'): SDKGene
     timeout: 30000,
   };
 }
-
-export { generatePythonSDK } from './python-generator';
-export { generateTypeScriptSDK } from './typescript-generator';

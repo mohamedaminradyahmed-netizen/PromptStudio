@@ -23,6 +23,8 @@ model User {
   editHistory      EditHistory[]
   comments         Comment[]
   cacheEntries     SemanticCache[]
+  marketplacePrompts MarketplacePrompt[]
+  marketplaceReviews MarketplaceReview[]
 }
 
 // Collaboration Session
@@ -188,4 +190,54 @@ model CacheConfig {
   invalidationRules   Json    @default("[]")
 
   updatedAt DateTime @updatedAt
+}
+
+// Marketplace Prompt
+model MarketplacePrompt {
+  id            String   @id @default(uuid())
+  authorId      String?
+  authorName    String   @default("Anonymous")
+  title         String
+  description   String
+  content       String
+  category      String
+  tags          String[]
+  modelRecommendation String @default("gpt-4")
+  variables     Json     @default("[]")
+  avgRating     Float    @default(0)
+  reviewCount   Int      @default(0)
+  cloneCount    Int      @default(0)
+  viewCount     Int      @default(0)
+  isFeatured    Boolean  @default(false)
+  isStaffPick   Boolean  @default(false)
+  status        String   @default("pending")
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  // Relations
+  author        User?    @relation(fields: [authorId], references: [id])
+  reviews       MarketplaceReview[]
+
+  @@index([status])
+  @@index([category])
+  @@index([isFeatured])
+  @@index([avgRating])
+}
+
+// Marketplace Review
+model MarketplaceReview {
+  id            String   @id @default(uuid())
+  promptId      String
+  reviewerId    String?
+  reviewerName  String   @default("Anonymous")
+  rating        Int
+  reviewText    String   @default("")
+  isVerified    Boolean  @default(false)
+  createdAt     DateTime @default(now())
+
+  // Relations
+  prompt        MarketplacePrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
+  reviewer      User?             @relation(fields: [reviewerId], references: [id])
+
+  @@index([promptId])
 }
