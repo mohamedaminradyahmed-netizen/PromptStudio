@@ -1,5 +1,6 @@
-import { useState } from 'react';
-import { AlertCircle, Brain, Shield, DollarSign, Zap, GitBranch } from 'lucide-react';
+import { useState, useCallback, useEffect } from 'react';
+import { AlertCircle, Brain, Shield, DollarSign, Zap, GitBranch, ShieldCheck, ShieldAlert, Loader2 } from 'lucide-react';
+import { SafetyWarningsPanel, SafetyCheckResult, SafetyIssue } from './SafetyWarningsPanel';
 
 interface HierarchicalPrompt {
   systemPrompt: string;
@@ -16,6 +17,8 @@ interface AdvancedSettings {
   toolPlanning: boolean;
   selfRefinement: boolean;
   safetyChecks: boolean;
+  autoSanitize: boolean;
+  blockOnCritical: boolean;
 }
 
 interface PreSendAnalysis {
@@ -24,6 +27,7 @@ interface PreSendAnalysis {
   successProbability: number;
   safetyScore: number;
   recommendations: string[];
+  safetyResult?: SafetyCheckResult;
 }
 
 export function AdvancedPromptEditor() {
@@ -40,27 +44,242 @@ export function AdvancedPromptEditor() {
     toolPlanning: false,
     selfRefinement: false,
     safetyChecks: true,
+    autoSanitize: false,
+    blockOnCritical: true,
   });
 
   const [analysis, setAnalysis] = useState<PreSendAnalysis | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [safetyResult, setSafetyResult] = useState<SafetyCheckResult | null>(null);
+
+  // Perform safety check on content
+  const performSafetyCheck = useCallback((content: string): SafetyCheckResult => {
+    const issues: SafetyIssue[] = [];
+    let issueId = 0;
+
+    // Toxicity patterns
+    const toxicityPatterns = [
+      { pattern: /\b(hate|attack|kill|destroy)\s+(all|every)?\s*(people|humans|users)/gi, category: 'hate_speech', severity: 'critical' as const },
+      { pattern: /\b(racist|sexist|homophobic|transphobic)\b/gi, category: 'discrimination', severity: 'high' as const },
+      { pattern: /\b(stupid|idiot|dumb|moron)\b/gi, category: 'insults', severity: 'medium' as const },
+    ];
+
+    // PII patterns
+    const piiPatterns = [
+      { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, type: 'email', severity: 'high' as const, redaction: '[بريد_محذوف]' },
+      { pattern: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, type: 'phone', severity: 'high' as const, redaction: '[هاتف_محذوف]' },
+      { pattern: /\b\d{3}[-]?\d{2}[-]?\d{4}\b/g, type: 'ssn', severity: 'critical' as const, redaction: '[رقم_ضمان_محذوف]' },
+      { pattern: /(?:api[_-]?key|apikey|secret[_-]?key)[=:]\s*['"]?[\w-]+['"]?/gi, type: 'api_key', severity: 'critical' as const, redaction: '[مفتاح_API_محذوف]' },
+    ];
+
+    // Injection patterns
+    const injectionPatterns = [
+      { pattern: /ignore\s+(all\s+)?previous\s+instructions?/gi, message: 'محاولة تجاوز التعليمات', severity: 'critical' as const },
+      { pattern: /disregard\s+(all\s+)?(previous|above)/gi, message: 'محاولة تجاهل التعليمات', severity: 'critical' as const },
+      { pattern: /you\s+are\s+now\s+(?:a|an)?\s*\w+/gi, message: 'محاولة تغيير الدور', severity: 'high' as const },
+      { pattern: /jailbreak|DAN\s+mode|bypass/gi, message: 'محاولة كسر القيود', severity: 'critical' as const },
+    ];
+
+    // Check toxicity
+    for (const { pattern, category, severity } of toxicityPatterns) {
+      pattern.lastIndex = 0;
+      const matches = content.matchAll(pattern);
+      for (const match of matches) {
+        issues.push({
+          id: `issue_${++issueId}`,
+          type: 'toxicity',
+          severity,
+          title: `محتوى سام: ${category}`,
+          description: `تم اكتشاف لغة سامة: "${match[0]}"`,
+          location: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+          matchedContent: match[0],
+          suggestion: 'قم بإزالة أو إعادة صياغة هذا المحتوى',
+          autoFixable: true,
+          fixedContent: '[تم الحذف]',
+        });
+      }
+    }
+
+    // Check PII
+    for (const { pattern, type, severity, redaction } of piiPatterns) {
+      pattern.lastIndex = 0;
+      const matches = content.matchAll(pattern);
+      for (const match of matches) {
+        issues.push({
+          id: `issue_${++issueId}`,
+          type: 'pii',
+          severity,
+          title: `معلومات شخصية: ${type}`,
+          description: `تم اكتشاف ${type} محتمل`,
+          location: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+          matchedContent: match[0].substring(0, 4) + '****',
+          suggestion: `قم بإخفاء ${type} قبل الإرسال`,
+          autoFixable: true,
+          fixedContent: redaction,
+        });
+      }
+    }
+
+    // Check injection
+    for (const { pattern, message, severity } of injectionPatterns) {
+      pattern.lastIndex = 0;
+      const matches = content.matchAll(pattern);
+      for (const match of matches) {
+        issues.push({
+          id: `issue_${++issueId}`,
+          type: 'injection',
+          severity,
+          title: 'محاولة حقن',
+          description: message,
+          location: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+          matchedContent: match[0],
+          suggestion: 'قم بإزالة نمط الحقن',
+          autoFixable: false,
+        });
+      }
+    }
+
+    // Calculate score
+    let score = 100;
+    for (const issue of issues) {
+      switch (issue.severity) {
+        case 'critical': score -= 30; break;
+        case 'high': score -= 20; break;
+        case 'medium': score -= 10; break;
+        case 'low': score -= 5; break;
+      }
+    }
+    score = Math.max(0, score);
+
+    // Generate recommendations
+    const recommendations: string[] = [];
+    const issueTypes = new Set(issues.map(i => i.type));
+    if (issueTypes.has('toxicity')) recommendations.push('قم بإزالة اللغة السامة قبل الإرسال');
+    if (issueTypes.has('pii')) recommendations.push('قم بإخفاء المعلومات الشخصية');
+    if (issueTypes.has('injection')) recommendations.push('قم بإزالة أنماط الحقن');
+
+    // Sanitize content if needed
+    let sanitizedContent: string | undefined;
+    if (settings.autoSanitize) {
+      sanitizedContent = content;
+      const fixableIssues = [...issues]
+        .filter(i => i.autoFixable && i.location && i.fixedContent)
+        .sort((a, b) => (b.location?.start ?? 0) - (a.location?.start ?? 0));
+
+      for (const issue of fixableIssues) {
+        if (issue.location && issue.fixedContent) {
+          sanitizedContent =
+            sanitizedContent.substring(0, issue.location.start) +
+            issue.fixedContent +
+            sanitizedContent.substring(issue.location.end);
+        }
+      }
+    }
+
+    const blocked = issues.some(i => i.severity === 'critical') && settings.blockOnCritical;
+
+    return {
+      passed: !blocked && score >= 50,
+      blocked,
+      score,
+      issues,
+      sanitizedContent,
+      recommendations,
+    };
+  }, [settings.autoSanitize, settings.blockOnCritical]);
 
   const handleAnalyze = async () => {
-    // Simulate analysis
+    setIsAnalyzing(true);
+
+    // Simulate async analysis
+    await new Promise(resolve => setTimeout(resolve, 500));
+
     const fullPrompt = buildFullPrompt();
     const tokens = Math.ceil(fullPrompt.length / 4);
+
+    // Perform safety check if enabled
+    let safetyCheckResult: SafetyCheckResult | undefined;
+    if (settings.safetyChecks) {
+      safetyCheckResult = performSafetyCheck(fullPrompt);
+      setSafetyResult(safetyCheckResult);
+    }
 
     setAnalysis({
       estimatedTokens: tokens,
       estimatedCost: tokens * 0.00003,
-      successProbability: 0.85,
-      safetyScore: 0.92,
-      recommendations: [
+      successProbability: safetyCheckResult?.blocked ? 0 : 0.85,
+      safetyScore: safetyCheckResult ? safetyCheckResult.score / 100 : 0.92,
+      recommendations: safetyCheckResult?.recommendations ?? [
         'Consider adding more specific examples',
         'Output format could be more structured',
       ],
+      safetyResult: safetyCheckResult,
     });
+
+    setIsAnalyzing(false);
   };
+
+  // Handle applying a single fix
+  const handleApplyFix = useCallback((issueId: string, fixedContent: string) => {
+    if (!safetyResult) return;
+
+    const issue = safetyResult.issues.find(i => i.id === issueId);
+    if (!issue?.location) return;
+
+    const fullPrompt = buildFullPrompt();
+    const newContent =
+      fullPrompt.substring(0, issue.location.start) +
+      fixedContent +
+      fullPrompt.substring(issue.location.end);
+
+    // Update the hierarchical prompts based on the fix
+    // For simplicity, we'll update the task prompt
+    setHierarchical(prev => ({
+      ...prev,
+      taskPrompt: newContent.replace(/# System\n.*?(?=# Process|# Task|# Output|$)/s, '')
+                           .replace(/# Process\n.*?(?=# Task|# Output|$)/s, '')
+                           .replace(/# Task\n/s, '')
+                           .replace(/# Output\n.*$/s, ''),
+    }));
+
+    // Re-run analysis
+    handleAnalyze();
+  }, [safetyResult]);
+
+  // Handle applying all fixes
+  const handleApplyAllFixes = useCallback((sanitizedContent: string) => {
+    // Parse the sanitized content back to hierarchical structure
+    const systemMatch = sanitizedContent.match(/# System\n([\s\S]*?)(?=# Process|# Task|# Output|$)/);
+    const processMatch = sanitizedContent.match(/# Process\n([\s\S]*?)(?=# Task|# Output|$)/);
+    const taskMatch = sanitizedContent.match(/# Task\n([\s\S]*?)(?=# Output|$)/);
+    const outputMatch = sanitizedContent.match(/# Output\n([\s\S]*)$/);
+
+    setHierarchical({
+      systemPrompt: systemMatch?.[1]?.trim() ?? '',
+      processPrompt: processMatch?.[1]?.trim() ?? '',
+      taskPrompt: taskMatch?.[1]?.trim() ?? '',
+      outputPrompt: outputMatch?.[1]?.trim() ?? '',
+    });
+
+    // Re-run analysis
+    setTimeout(handleAnalyze, 100);
+  }, []);
+
+  // Auto-analyze on content change (debounced)
+  useEffect(() => {
+    if (!settings.safetyChecks) return;
+
+    const timer = setTimeout(() => {
+      const fullPrompt = buildFullPrompt();
+      if (fullPrompt.length > 10) {
+        const result = performSafetyCheck(fullPrompt);
+        setSafetyResult(result);
+      }
+    }, 1000);
+
+    return () => clearTimeout(timer);
+  }, [hierarchical, settings.safetyChecks, performSafetyCheck]);
 
   const buildFullPrompt = () => {
     const parts: string[] = [];
@@ -245,6 +464,36 @@ export function AdvancedPromptEditor() {
               </label>
             </div>
 
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={settings.autoSanitize}
+                onChange={(e) =>
+                  setSettings({ ...settings, autoSanitize: e.target.checked })
+                }
+                className="w-4 h-4"
+                disabled={!settings.safetyChecks}
+              />
+              <label className={`text-sm font-medium ${settings.safetyChecks ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}`}>
+                Auto-Sanitize Content
+              </label>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <input
+                type="checkbox"
+                checked={settings.blockOnCritical}
+                onChange={(e) =>
+                  setSettings({ ...settings, blockOnCritical: e.target.checked })
+                }
+                className="w-4 h-4"
+                disabled={!settings.safetyChecks}
+              />
+              <label className={`text-sm font-medium ${settings.safetyChecks ? 'text-gray-700 dark:text-gray-300' : 'text-gray-400 dark:text-gray-500'}`}>
+                Block on Critical Issues
+              </label>
+            </div>
+
             <div className="col-span-2">
               <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
                 Reasoning Mode
@@ -268,14 +517,39 @@ export function AdvancedPromptEditor() {
         )}
       </div>
 
+      {/* Safety Warnings Panel */}
+      {settings.safetyChecks && safetyResult && safetyResult.issues.length > 0 && (
+        <div className="space-y-4">
+          <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+            <ShieldAlert className="w-5 h-5 text-yellow-500" />
+            تحذيرات السلامة
+          </h3>
+          <SafetyWarningsPanel
+            result={safetyResult}
+            isLoading={isAnalyzing}
+            onApplyFix={handleApplyFix}
+            onApplyAllFixes={handleApplyAllFixes}
+            showPreview={settings.autoSanitize}
+            language="ar"
+          />
+        </div>
+      )}
+
       {/* Pre-Send Analysis */}
       <div className="space-y-4">
         <button
           onClick={handleAnalyze}
-          className="px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg flex items-center gap-2"
+          disabled={isAnalyzing}
+          className={`px-4 py-2 ${
+            isAnalyzing ? 'bg-gray-400' : 'bg-blue-500 hover:bg-blue-600'
+          } text-white rounded-lg flex items-center gap-2 transition-colors`}
         >
-          <Zap className="w-4 h-4" />
-          Analyze Before Sending
+          {isAnalyzing ? (
+            <Loader2 className="w-4 h-4 animate-spin" />
+          ) : (
+            <Zap className="w-4 h-4" />
+          )}
+          {isAnalyzing ? 'جاري التحليل...' : 'تحليل قبل الإرسال'}
         </button>
 
         {analysis && (
