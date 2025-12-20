@@ -9,9 +9,7 @@ export const SUPPORTED_LANGUAGES: LanguageInfo[] = [
   { code: 'zh', name: 'Chinese', nativeName: '中文', direction: 'ltr', flag: '🇨🇳' },
 ];
 
-
-import { LLMServiceAdapter } from './LLMServiceAdapter';
-import { cacheTranslation } from './translationCache';
+const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001';
 
 const culturalAdaptations: Record<Language, Record<string, string[]>> = {
   ar: {
@@ -50,8 +48,6 @@ function generateId(): string {
   return `trans_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 }
 
-
-
 function transformWithCulturalContext(
   text: string,
   targetLang: Language,
@@ -65,7 +61,8 @@ function transformWithCulturalContext(
   }
 
   if (context.adaptCulturalReferences) {
-    notes.push(`Cultural references have been adapted for ${SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name} speakers`);
+    const languageName = SUPPORTED_LANGUAGES.find(l => l.code === targetLang)?.name;
+    notes.push(`Cultural references have been adapted for ${languageName} speakers`);
   }
 
   if (!context.preserveIdioms) {
@@ -75,21 +72,34 @@ function transformWithCulturalContext(
   return { text: transformedText, notes };
 }
 
+export async function translateText(
   sourceText: string,
   sourceLanguage: Language,
   targetLanguage: Language,
   culturalContext: CulturalContext
 ): Promise<TranslationResult> {
-  const apiKey = process.env.OPENAI_API_KEY || '';
-  const llm = new LLMServiceAdapter(apiKey);
-  const systemPrompt = `You are a professional localization assistant. Translate and localize the following text for ${targetLanguage} speakers. Consider cultural context: ${JSON.stringify(culturalContext)}.`;
-  const translatedText = await llm.translate({
-    prompt: sourceText,
-    sourceLanguage,
-    targetLanguage,
-    systemPrompt,
-    cache: cacheTranslation,
-  });
+  const payload = { text: sourceText, targetLang: targetLanguage, context: culturalContext };
+
+  let translatedText = sourceText;
+
+  try {
+    const response = await fetch(`${API_BASE}/api/translation`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+      throw new Error(`Translation failed with status ${response.status}`);
+    }
+
+    const data: { translatedText?: string } = await response.json();
+    translatedText = data.translatedText ?? sourceText;
+  } catch (error) {
+    console.error('Translation API Error:', error);
+  }
 
   const { text: adaptedText, notes } = transformWithCulturalContext(
     translatedText,
@@ -114,6 +124,7 @@ function transformWithCulturalContext(
   };
 }
 
+export function translateMultiple(
   sourceText: string,
   sourceLanguage: Language,
   targetLanguages: Language[],
@@ -131,7 +142,6 @@ export function getLanguageInfo(code: Language): LanguageInfo | undefined {
 }
 
 export function detectLanguage(text: string): Language {
-  // Simple language detection based on character sets
   const arabicPattern = /[\u0600-\u06FF]/;
   const chinesePattern = /[\u4E00-\u9FFF]/;
   const spanishPattern = /[áéíóúüñ¿¡]/i;
@@ -144,5 +154,5 @@ export function detectLanguage(text: string): Language {
   if (frenchPattern.test(text)) return 'fr';
   if (germanPattern.test(text)) return 'de';
 
-  return 'en'; // Default to English
+  return 'en';
 }

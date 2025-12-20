@@ -8,6 +8,7 @@ import { setupWebSocket } from './websocket/index.js';
 import { authRouter } from './api/routes/auth.js';
 import { sessionRouter } from './api/routes/sessions.js';
 import { cacheRouter } from './api/routes/cache.js';
+import { translationRouter } from './api/routes/translation.js';
 import { errorHandler } from './api/middleware/errorHandler.js';
 import { authMiddleware } from './api/middleware/auth.js';
 
@@ -43,6 +44,7 @@ app.get('/health', (req, res) => {
 app.use('/api/auth', authRouter);
 app.use('/api/sessions', authMiddleware, sessionRouter);
 app.use('/api/cache', authMiddleware, cacheRouter);
+app.use('/api/translation', translationRouter);
 
 // Error handler
 app.use(errorHandler);
