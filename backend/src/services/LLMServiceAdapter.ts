@@ -1,4 +1,6 @@
 import { PromptService } from './PromptService';
+import OpenAI from 'openai';
+import { config } from '../config/index.js';
 
 export interface ThoughtNode {
   id: string;
@@ -6,6 +8,7 @@ export interface ThoughtNode {
   score: number;
   children: ThoughtNode[];
   depth: number;
+  reasoning?: string;
 }
 
 export interface ReasoningPath {
@@ -87,19 +90,74 @@ export class LLMServiceAdapter {
   }
 
   /**
-   * Generate a thought continuation
+   * Generate a thought continuation using LLM
    */
   private static async generateThought(context: string, variant: number): Promise<string> {
-    // In a real implementation, this would call an LLM
-    // For now, return a placeholder
-    return `Thought continuation ${variant} based on: ${context.substring(0, 50)}...`;
+    if (!config.openai.apiKey) {
+      throw new Error('OPENAI_API_KEY is not configured');
+    }
+
+    const openai = new OpenAI({ apiKey: config.openai.apiKey });
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content: 'You are an expert reasoning assistant. Generate a thoughtful continuation or reasoning step based on the given context. Be specific and analytical.',
+        },
+        {
+          role: 'user',
+          content: `Context: ${context}\n\nGenerate reasoning step variant ${variant + 1}. Explore a different angle or approach.`,
+        },
+      ],
+      temperature: 0.7 + (variant * 0.1),
+      max_tokens: 300,
+    });
+
+    return response.choices[0]?.message?.content?.trim() || `Thought continuation ${variant}`;
   }
 
   /**
-   * Evaluate a thought using multiple criteria
+   * Evaluate a thought using LLM-as-a-Judge
    */
-  private static async evaluateThought(thought: string): Promise<number> {
-    // Simple heuristic evaluation
+  private static async evaluateThought(thought: string, criteria: string[] = ['coherence', 'relevance', 'completeness']): Promise<number> {
+    if (!config.openai.apiKey) {
+      // Fallback to heuristic evaluation
+      return this.heuristicEvaluateThought(thought);
+    }
+
+    const openai = new OpenAI({ apiKey: config.openai.apiKey });
+
+    const response = await openai.chat.completions.create({
+      model: 'gpt-4',
+      messages: [
+        {
+          role: 'system',
+          content: `You are an expert evaluator. Evaluate the following thought based on these criteria: ${criteria.join(', ')}. Return ONLY a JSON object with a 'score' field (0-1) and a 'reasoning' field explaining your evaluation.`,
+        },
+        {
+          role: 'user',
+          content: `Evaluate this thought:\n\n${thought}`,
+        },
+      ],
+      temperature: 0.2,
+      max_tokens: 200,
+      response_format: { type: 'json_object' },
+    });
+
+    try {
+      const result = JSON.parse(response.choices[0]?.message?.content || '{"score": 0.5}');
+      return Math.min(Math.max(result.score || 0.5, 0), 1);
+    } catch {
+      return this.heuristicEvaluateThought(thought);
+    }
+  }
+
+  /**
+   * Fallback heuristic evaluation
+   */
+  private static heuristicEvaluateThought(thought: string): number {
     let score = 0.5;
 
     // Check for coherence (presence of connecting words)

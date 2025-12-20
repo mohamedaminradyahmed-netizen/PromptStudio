@@ -12,6 +12,7 @@ import { translationRouter } from './api/routes/translation.js';
 import promptRoutes from './api/routes/prompts.js';
 import ragRoutes from './api/routes/rag.js';
 import chainRoutes from './api/routes/chains.js';
+import reasoningRoutes from './api/routes/reasoning.js';
 import { errorHandler } from './api/middleware/errorHandler.js';
 import { authMiddleware } from './api/middleware/auth.js';
 
@@ -51,6 +52,7 @@ app.use('/api/translation', translationRouter);
 app.use('/api/prompts', promptRoutes);
 app.use('/api/rag', ragRoutes);
 app.use('/api/chains', chainRoutes);
+app.use('/api/reasoning', reasoningRoutes);
 
 // Error handler
 app.use(errorHandler);
