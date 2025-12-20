@@ -1,0 +1,345 @@
+paths:
+  /api/prediction/analyze:
+    post:
+      tags:
+        - Prediction
+      summary: Comprehensive analysis
+      description: Perform comprehensive pre-send analysis including tokens, cost, and success prediction
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                prompt:
+                  type: string
+                  minLength: 1
+                  example: Write a Python function to sort an array
+                model:
+                  type: string
+                  default: gpt-4
+                  example: gpt-4
+                expectedOutputLength:
+                  type: string
+                  enum: [short, medium, long, very_long]
+                  default: medium
+                requestsPerMonth:
+                  type: integer
+                  minimum: 1
+                  default: 100
+                includeHistory:
+                  type: boolean
+                  default: true
+      responses:
+        '200':
+          description: Analysis result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/PredictionResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/prediction/quick:
+    post:
+      tags:
+        - Prediction
+      summary: Quick analysis
+      description: Perform quick analysis for real-time feedback
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                prompt:
+                  type: string
+                  minLength: 1
+                model:
+                  type: string
+                  default: gpt-4
+      responses:
+        '200':
+          description: Quick analysis result
+
+  /api/prediction/tokens:
+    post:
+      tags:
+        - Prediction
+      summary: Estimate tokens
+      description: Estimate token count for a prompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                prompt:
+                  type: string
+                  minLength: 1
+                model:
+                  type: string
+                  default: gpt-4
+                expectedOutputLength:
+                  type: string
+                  enum: [short, medium, long, very_long]
+                  default: medium
+      responses:
+        '200':
+          description: Token estimation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      inputTokens:
+                        type: integer
+                      estimatedOutputTokens:
+                        type: integer
+                      totalTokens:
+                        type: integer
+
+  /api/prediction/cost:
+    post:
+      tags:
+        - Prediction
+      summary: Estimate cost
+      description: Estimate the cost for a prompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                prompt:
+                  type: string
+                model:
+                  type: string
+                  default: gpt-4
+                expectedOutputLength:
+                  type: string
+                  enum: [short, medium, long, very_long]
+                  default: medium
+                requestsPerMonth:
+                  type: integer
+                  default: 100
+      responses:
+        '200':
+          description: Cost estimation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      inputCost:
+                        type: number
+                      outputCost:
+                        type: number
+                      totalCost:
+                        type: number
+                      monthlyCost:
+                        type: number
+                      tokens:
+                        type: object
+
+  /api/prediction/success:
+    post:
+      tags:
+        - Prediction
+      summary: Predict success
+      description: Predict the success probability of a prompt
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                prompt:
+                  type: string
+                model:
+                  type: string
+                  default: gpt-4
+      responses:
+        '200':
+          description: Success prediction
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      probability:
+                        type: number
+                        minimum: 0
+                        maximum: 1
+                      confidence:
+                        type: number
+                      factors:
+                        type: array
+                        items:
+                          type: string
+                      recommendations:
+                        type: array
+                        items:
+                          type: string
+
+  /api/prediction/response-time:
+    post:
+      tags:
+        - Prediction
+      summary: Estimate response time
+      description: Estimate the expected response time
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                prompt:
+                  type: string
+                model:
+                  type: string
+                  default: gpt-4
+                expectedOutputLength:
+                  type: string
+                  enum: [short, medium, long, very_long]
+                  default: medium
+      responses:
+        '200':
+          description: Response time estimation
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      estimatedSeconds:
+                        type: number
+                      range:
+                        type: object
+                        properties:
+                          min:
+                            type: number
+                          max:
+                            type: number
+
+  /api/prediction/models:
+    get:
+      tags:
+        - Prediction
+      summary: Get available models
+      description: Get list of available models with pricing information
+      responses:
+        '200':
+          description: List of models
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        id:
+                          type: string
+                        name:
+                          type: string
+                        inputCostPer1K:
+                          type: number
+                        outputCostPer1K:
+                          type: number
+
+  /api/prediction/compare:
+    post:
+      tags:
+        - Prediction
+      summary: Compare models
+      description: Compare analysis across multiple models
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - prompt
+              properties:
+                prompt:
+                  type: string
+                models:
+                  type: array
+                  items:
+                    type: string
+                  minItems: 1
+                  default: ['gpt-4', 'gpt-3.5-turbo', 'claude-3-sonnet']
+      responses:
+        '200':
+          description: Model comparison
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      comparisons:
+                        type: array
+                        items:
+                          type: object
+                      recommendations:
+                        type: object
+                        properties:
+                          bestForCost:
+                            type: string
+                          bestForSuccess:
+                            type: string
+                          bestForSpeed:
+                            type: string
