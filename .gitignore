@@ -52,3 +52,28 @@ coverage/
 # Prisma
 backend/prisma/*.db
 backend/prisma/*.db-journal
+**/prisma/migrations/**/*.db
+**/prisma/migrations/**/*.db-journal
+
+# Docker
+docker-compose.override.yml
+.docker/
+
+# Secrets & Config
+*.key
+*.cert
+*.pem
+secrets/
+config/production.json
+
+# Database dumps
+*.sql
+*.dump
+
+# Redis
+dump.rdb
+
+# Generated files
+**/.turbo
+**/.vercel
+**/.netlify
