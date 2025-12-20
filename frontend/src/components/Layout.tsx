@@ -8,6 +8,7 @@ import {
   Settings,
   Menu,
   X,
+  FlaskConical,
 } from 'lucide-react';
 import { useState } from 'react';
 
@@ -65,6 +66,14 @@ export default function Layout() {
             >
               <Database size={20} />
               <span>Semantic Cache</span>
+            </Link>
+            <Link
+              to="/experiments"
+              className="flex items-center gap-3 px-3 py-2 rounded-md text-muted-foreground hover:bg-accent hover:text-accent-foreground transition-colors"
+              onClick={() => setSidebarOpen(false)}
+            >
+              <FlaskConical size={20} />
+              <span>Prompt Experiments</span>
             </Link>
           </nav>
 

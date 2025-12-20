@@ -7,6 +7,7 @@ import DashboardPage from './pages/DashboardPage';
 import SessionPage from './pages/SessionPage';
 import CacheDashboardPage from './pages/CacheDashboardPage';
 import JoinSessionPage from './pages/JoinSessionPage';
+import ExperimentTestingPage from './pages/ExperimentTestingPage';
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { isAuthenticated, checkAuth } = useAuthStore();
@@ -38,6 +39,7 @@ export default function App() {
         <Route index element={<DashboardPage />} />
         <Route path="session/:sessionId" element={<SessionPage />} />
         <Route path="cache" element={<CacheDashboardPage />} />
+        <Route path="experiments" element={<ExperimentTestingPage />} />
       </Route>
     </Routes>
   );

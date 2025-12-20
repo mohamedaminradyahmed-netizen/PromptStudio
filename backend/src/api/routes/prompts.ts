@@ -5,6 +5,16 @@ import { SafetyService } from '../../services/SafetyService';
 import { RAGService } from '../../services/RAGService';
 import { PromptChainService } from '../../services/PromptChainService';
 import { PromptOptimizationService } from '../../services/PromptOptimizationService';
+import {
+  BayesianPromptOptimizer,
+  quickOptimize,
+  comparePrompts,
+  ExperimentConfig,
+  ExperimentResult,
+} from '../../services/BayesianPromptOptimizer';
+
+// In-memory store for experiment history (in production, use database)
+const experimentHistory: Map<string, ExperimentResult> = new Map();
 
 const router = Router();
 
@@ -219,6 +229,264 @@ router.post('/ab-test', async (req: Request, res: Response) => {
     res.json(result);
   } catch (error) {
     res.status(500).json({ error: 'Failed to perform A/B test' });
+  }
+});
+
+// ============================================================================
+// Bayesian/Evolutionary Prompt Optimization Experiments
+// ============================================================================
+
+// Run full Bayesian optimization experiment
+router.post('/experiments/bayesian', async (req: Request, res: Response) => {
+  try {
+    const { prompt, config } = req.body as {
+      prompt: string;
+      config?: Partial<ExperimentConfig>;
+    };
+
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    const optimizer = new BayesianPromptOptimizer(prompt, config);
+    const result = await optimizer.runExperiment();
+
+    // Store in history
+    experimentHistory.set(result.experimentId, result);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Bayesian experiment failed:', error);
+    res.status(500).json({ error: 'Failed to run Bayesian optimization experiment' });
+  }
+});
+
+// Quick optimization (simplified, fewer iterations)
+router.post('/experiments/quick-optimize', async (req: Request, res: Response) => {
+  try {
+    const { prompt, options } = req.body;
+
+    if (!prompt || typeof prompt !== 'string') {
+      return res.status(400).json({ error: 'Prompt is required' });
+    }
+
+    const result = await quickOptimize(prompt, options);
+
+    // Store in history
+    experimentHistory.set(result.experimentId, result);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Quick optimization failed:', error);
+    res.status(500).json({ error: 'Failed to run quick optimization' });
+  }
+});
+
+// Compare multiple prompts
+router.post('/experiments/compare', async (req: Request, res: Response) => {
+  try {
+    const { prompts, evaluationRounds } = req.body;
+
+    if (!prompts || !Array.isArray(prompts) || prompts.length < 2) {
+      return res.status(400).json({ error: 'At least 2 prompts are required for comparison' });
+    }
+
+    const result = await comparePrompts(prompts, evaluationRounds);
+
+    res.json({
+      success: true,
+      data: result,
+    });
+  } catch (error) {
+    console.error('Prompt comparison failed:', error);
+    res.status(500).json({ error: 'Failed to compare prompts' });
+  }
+});
+
+// Get experiment history
+router.get('/experiments/history', async (req: Request, res: Response) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+
+    const experiments = Array.from(experimentHistory.values())
+      .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
+      .slice(Number(offset), Number(offset) + Number(limit));
+
+    res.json({
+      success: true,
+      data: {
+        experiments,
+        total: experimentHistory.size,
+        limit: Number(limit),
+        offset: Number(offset),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch experiment history' });
+  }
+});
+
+// Get specific experiment by ID
+router.get('/experiments/:experimentId', async (req: Request, res: Response) => {
+  try {
+    const { experimentId } = req.params;
+
+    const experiment = experimentHistory.get(experimentId);
+
+    if (!experiment) {
+      return res.status(404).json({ error: 'Experiment not found' });
+    }
+
+    res.json({
+      success: true,
+      data: experiment,
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch experiment' });
+  }
+});
+
+// Get experiment trials/details
+router.get('/experiments/:experimentId/trials', async (req: Request, res: Response) => {
+  try {
+    const { experimentId } = req.params;
+    const { iteration } = req.query;
+
+    const experiment = experimentHistory.get(experimentId);
+
+    if (!experiment) {
+      return res.status(404).json({ error: 'Experiment not found' });
+    }
+
+    let trials = experiment.trials;
+
+    // Filter by iteration if specified
+    if (iteration !== undefined) {
+      trials = trials.filter(t => t.iteration === Number(iteration));
+    }
+
+    res.json({
+      success: true,
+      data: {
+        trials,
+        summary: experiment.summary,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch experiment trials' });
+  }
+});
+
+// Apply best prompt from experiment (mark as selected)
+router.post('/experiments/:experimentId/apply', async (req: Request, res: Response) => {
+  try {
+    const { experimentId } = req.params;
+
+    const experiment = experimentHistory.get(experimentId);
+
+    if (!experiment) {
+      return res.status(404).json({ error: 'Experiment not found' });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        appliedPrompt: experiment.bestPrompt,
+        originalPrompt: experiment.basePrompt,
+        improvement: experiment.improvement,
+        message: 'Best prompt has been selected for use',
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to apply experiment result' });
+  }
+});
+
+// Delete experiment from history
+router.delete('/experiments/:experimentId', async (req: Request, res: Response) => {
+  try {
+    const { experimentId } = req.params;
+
+    if (!experimentHistory.has(experimentId)) {
+      return res.status(404).json({ error: 'Experiment not found' });
+    }
+
+    experimentHistory.delete(experimentId);
+
+    res.json({
+      success: true,
+      message: 'Experiment deleted successfully',
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete experiment' });
+  }
+});
+
+// Get optimization statistics
+router.get('/experiments/stats/summary', async (req: Request, res: Response) => {
+  try {
+    const experiments = Array.from(experimentHistory.values());
+
+    if (experiments.length === 0) {
+      return res.json({
+        success: true,
+        data: {
+          totalExperiments: 0,
+          avgImprovement: 0,
+          totalTrials: 0,
+          mostEffectiveMutation: null,
+        },
+      });
+    }
+
+    const totalExperiments = experiments.length;
+    const avgImprovement = experiments.reduce((sum, e) => sum + e.improvement, 0) / totalExperiments;
+    const totalTrials = experiments.reduce((sum, e) => sum + e.trials.length, 0);
+
+    // Calculate most effective mutation across all experiments
+    const mutationScores: Record<string, number[]> = {};
+    for (const exp of experiments) {
+      for (const [type, score] of Object.entries(exp.summary.mutationEffectiveness)) {
+        if (!mutationScores[type]) {
+          mutationScores[type] = [];
+        }
+        mutationScores[type].push(score);
+      }
+    }
+
+    let mostEffectiveMutation: string | null = null;
+    let highestAvgScore = 0;
+    for (const [type, scores] of Object.entries(mutationScores)) {
+      const avg = scores.reduce((a, b) => a + b, 0) / scores.length;
+      if (avg > highestAvgScore) {
+        highestAvgScore = avg;
+        mostEffectiveMutation = type;
+      }
+    }
+
+    res.json({
+      success: true,
+      data: {
+        totalExperiments,
+        avgImprovement: avgImprovement.toFixed(2),
+        totalTrials,
+        mostEffectiveMutation,
+        mutationEffectiveness: Object.fromEntries(
+          Object.entries(mutationScores).map(([type, scores]) => [
+            type,
+            (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(3),
+          ])
+        ),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch experiment statistics' });
   }
 });
 
