@@ -1,0 +1,49 @@
+name: meta_prompt
+category: refinement
+description: Apply meta-prompting techniques to improve a prompt
+template: |
+  Apply meta-prompting techniques to improve this prompt.
+
+  Original prompt:
+  {prompt}
+
+  Goal: {goal}
+
+  Consider applying these techniques:
+  - Chain-of-thought reasoning
+  - Few-shot examples
+  - Role-playing
+  - Step-by-step instructions
+  - Self-consistency
+  - Tree of thoughts
+
+  Provide:
+  1. The improved prompt
+  2. Which techniques were applied
+  3. Why each technique was chosen
+  4. Expected improvement in output quality
+parameters:
+  - name: prompt
+    type: string
+    description: The prompt to improve
+    required: true
+  - name: goal
+    type: string
+    description: What the prompt should achieve
+    required: false
+    default: "Generate high-quality, accurate responses"
+system_prompt: |
+  You are a meta-prompting expert. Your goal is to take a prompt and
+  transform it using advanced prompting techniques to maximize the
+  quality and reliability of LLM outputs. Always explain your reasoning.
+output_schema: null
+model: null
+temperature: 0.6
+max_tokens: 2000
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - meta-prompting
+    - optimization
+    - advanced

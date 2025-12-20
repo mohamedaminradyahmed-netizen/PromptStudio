@@ -1,0 +1,55 @@
+name: summarize
+category: generation
+description: Summarize text with configurable length and style
+template: |
+  Summarize the following text in {style} style.
+  Target length: {length}
+
+  Text to summarize:
+  {text}
+
+  Requirements:
+  - Preserve the main ideas and key points
+  - Use clear, concise language
+  - Maintain the original tone where appropriate
+  - Include any critical details or numbers
+parameters:
+  - name: text
+    type: string
+    description: The text to summarize
+    required: true
+  - name: length
+    type: string
+    description: Target summary length
+    required: false
+    default: "2-3 paragraphs"
+    choices:
+      - "1 sentence"
+      - "1 paragraph"
+      - "2-3 paragraphs"
+      - "bullet points"
+      - "executive summary"
+  - name: style
+    type: string
+    description: Summary style
+    required: false
+    default: "professional"
+    choices:
+      - "professional"
+      - "casual"
+      - "technical"
+      - "academic"
+system_prompt: |
+  You are an expert at distilling complex information into clear, concise summaries.
+  Focus on the most important information while maintaining accuracy.
+output_schema: null
+model: null
+temperature: 0.5
+max_tokens: 1000
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - summarization
+    - content
+    - writing

@@ -6,6 +6,7 @@ Main entry point for the Python backend service that provides:
 - YAML-based command system
 - WebSocket bridge to Node.js backend
 - REST API for LLM operations
+- Prompt chains, embeddings, templates, and batch processing
 """
 
 import asyncio
@@ -16,12 +17,24 @@ from loguru import logger
 
 from .core.config import settings
 from .core.logging import setup_logging
-from .api.routes import llm_router, commands_router, health_router
+from .api.routes import (
+    llm_router,
+    commands_router,
+    health_router,
+    chains_router,
+    embeddings_router,
+    templates_router,
+    batch_router,
+)
 from .websocket.bridge import bridge
 from .websocket.handlers import WebSocketHandlers
 from .services.llm_service import LLMService
 from .services.instructor_service import InstructorService
 from .services.command_service import CommandService
+from .services.prompt_chain_service import PromptChainService
+from .services.embedding_service import EmbeddingService
+from .services.template_service import TemplateService
+from .services.batch_service import BatchService
 
 
 # Setup logging
@@ -34,6 +47,7 @@ async def lifespan(app: FastAPI):
     Application lifespan manager
 
     Handles startup and shutdown events:
+    - Initialize all services
     - Connect to Node.js backend on startup
     - Disconnect on shutdown
     """
@@ -43,6 +57,10 @@ async def lifespan(app: FastAPI):
     llm_service = LLMService()
     instructor_service = InstructorService()
     command_service = CommandService()
+    chain_service = PromptChainService(llm_service, instructor_service)
+    embedding_service = EmbeddingService()
+    template_service = TemplateService()
+    batch_service = BatchService(llm_service, instructor_service)
 
     # Setup WebSocket handlers
     handlers = WebSocketHandlers(
@@ -56,6 +74,10 @@ async def lifespan(app: FastAPI):
     app.state.llm_service = llm_service
     app.state.instructor_service = instructor_service
     app.state.command_service = command_service
+    app.state.chain_service = chain_service
+    app.state.embedding_service = embedding_service
+    app.state.template_service = template_service
+    app.state.batch_service = batch_service
     app.state.handlers = handlers
 
     # Connect to Node.js backend (non-blocking)
@@ -85,8 +107,12 @@ app = FastAPI(
     ## Features
 
     - **Structured Outputs**: Get validated Pydantic models from LLM responses
-    - **Multi-Provider**: Support for OpenAI, Anthropic, and more via Mirascope
+    - **Multi-Provider**: Support for OpenAI, Anthropic, Google, Azure via Mirascope
     - **Command System**: YAML-based command definitions with hot-reload
+    - **Prompt Chains**: Execute multi-step prompt workflows
+    - **Embeddings**: Generate and search vector embeddings
+    - **Templates**: Manage prompt templates with inheritance
+    - **Batch Processing**: Process multiple prompts in parallel
     - **WebSocket Bridge**: Real-time communication with Node.js backend
     - **Prompt Analysis**: Analyze prompts for quality and safety
     - **Translation**: Multi-language prompt translation
@@ -111,6 +137,10 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(llm_router, prefix="/api")
 app.include_router(commands_router, prefix="/api")
+app.include_router(chains_router, prefix="/api")
+app.include_router(embeddings_router, prefix="/api")
+app.include_router(templates_router, prefix="/api")
+app.include_router(batch_router, prefix="/api")
 
 
 # WebSocket endpoint for direct client connections
@@ -134,6 +164,14 @@ async def root():
         "version": settings.app_version,
         "status": "running",
         "docs": "/docs" if settings.debug else "disabled",
+        "endpoints": {
+            "llm": "/api/llm",
+            "commands": "/api/commands",
+            "chains": "/api/chains",
+            "embeddings": "/api/embeddings",
+            "templates": "/api/templates",
+            "batch": "/api/batch",
+        },
     }
 
 
