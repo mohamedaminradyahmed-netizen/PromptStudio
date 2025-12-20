@@ -359,13 +359,136 @@ model KnowledgeDocument {
   // Embeddings
   embedding     Json?    // Vector embedding
 
+  // Source verification
+  isVerified    Boolean  @default(false)
+  verifiedAt    DateTime?
+  verifiedBy    String?
+
+  // Usage statistics
+  retrievalCount Int     @default(0)
+  lastRetrieved DateTime?
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   // Relations
   knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  contextSummaries ContextSummary[]
 
   @@index([knowledgeBaseId])
+  @@index([trustScore])
+  @@index([isVerified])
+}
+
+// RAG Context Session - للتتبع الديناميكي
+model RAGContextSession {
+  id            String   @id @default(uuid())
+  query         String
+  queryEmbedding Json?
+
+  // Context configuration
+  maxChunks     Int      @default(5)
+  minRelevance  Float    @default(0.7)
+  minTrust      Float    @default(0.5)
+
+  // Session results
+  totalChunks   Int      @default(0)
+  avgRelevance  Float?
+  avgTrust      Float?
+
+  createdAt     DateTime @default(now())
+
+  // Relations
+  summaries     ContextSummary[]
+  traces        ContextTrace[]
+
+  @@index([createdAt])
+}
+
+// Context Summary - تلخيص المقتطفات مع مؤشرات الثقة
+model ContextSummary {
+  id            String   @id @default(uuid())
+  sessionId     String
+  documentId    String
+
+  // Summary content
+  originalChunk String
+  summary       String
+
+  // Quality indicators
+  relevanceScore Float
+  trustScore    Float
+  confidenceScore Float  @default(0.8)
+
+  // Metadata
+  position      Int      // Position in the final context
+  tokenCount    Int      @default(0)
+  compressionRatio Float @default(1.0)
+
+  createdAt     DateTime @default(now())
+
+  // Relations
+  session       RAGContextSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  document      KnowledgeDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+  @@index([relevanceScore])
+  @@index([trustScore])
+}
+
+// Context Trace - حفظ أثر المصدر
+model ContextTrace {
+  id            String   @id @default(uuid())
+  sessionId     String
+
+  // Source tracking
+  sourceDocument String
+  sourceTitle   String
+  sourceUrl     String?
+
+  // Injection details
+  injectedAt    Int      // Position in final prompt
+  chunkSize     Int
+
+  // Attribution metadata
+  citationFormat String  @default("inline")
+  attributionText String
+
+  createdAt     DateTime @default(now())
+
+  // Relations
+  session       RAGContextSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([sessionId])
+}
+
+// Trusted Source Registry - سجل المصادر الموثوقة
+model TrustedSource {
+  id            String   @id @default(uuid())
+
+  // Source identification
+  name          String
+  domain        String?
+  url           String?
+  sourceType    String   @default("document") // document, api, database, etc.
+
+  // Trust configuration
+  baseTrustScore Float   @default(0.8)
+  autoVerify    Boolean  @default(false)
+
+  // Filtering rules
+  includePatterns Json?  @default("[]")
+  excludePatterns Json?  @default("[]")
+
+  // Statistics
+  documentCount Int      @default(0)
+  avgQualityScore Float? @default(0.8)
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@unique([domain])
+  @@index([baseTrustScore])
 }
 
 // Marketplace Review
