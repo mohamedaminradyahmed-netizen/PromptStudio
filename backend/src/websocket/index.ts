@@ -7,6 +7,7 @@ import { CRDTManager } from './managers/CRDTManager.js';
 import { handleCollaborationEvents } from './handlers/collaborationHandlers.js';
 import { handlePresenceEvents } from './handlers/presenceHandlers.js';
 import { handleCommentEvents } from './handlers/commentHandlers.js';
+import { pythonBridge } from '../services/PythonBridgeManager.js';
 
 export interface AuthenticatedSocket extends Socket {
   userId: string;
@@ -21,9 +22,19 @@ export const presenceManager = new PresenceManager();
 export const crdtManager = new CRDTManager();
 
 export function setupWebSocket(io: SocketIOServer): void {
-  // Authentication middleware
+  // Initialize Python Bridge Manager
+  pythonBridge.initialize(io);
+
+  // Authentication middleware - skip for Python service connections
   io.use(async (socket, next) => {
     try {
+      // Check if this is a Python service connection (no auth required)
+      const isPythonService = socket.handshake.query.service === 'python_llm';
+      if (isPythonService) {
+        console.log('🐍 Python service connecting...');
+        return next();
+      }
+
       const token = socket.handshake.auth.token || socket.handshake.query.token;
 
       if (!token) {
@@ -50,6 +61,27 @@ export function setupWebSocket(io: SocketIOServer): void {
 
   // Connection handler
   io.on('connection', (socket: Socket) => {
+    // Check if this is a Python service connection
+    const isPythonService = socket.handshake.query.service === 'python_llm';
+
+    if (isPythonService) {
+      // Python service connection - don't set up user handlers
+      console.log(`🐍 Python service socket connected: ${socket.id}`);
+
+      // Handle Python service disconnection
+      socket.on('disconnect', (reason) => {
+        console.log(`🐍 Python service disconnected: ${socket.id} - ${reason}`);
+      });
+
+      // Error handling for Python service
+      socket.on('error', (error) => {
+        console.error(`🐍 Python service socket error:`, error);
+      });
+
+      return; // Don't set up user event handlers for Python service
+    }
+
+    // Regular user connection
     const authSocket = socket as AuthenticatedSocket;
 
     console.log(`🔌 User connected: ${authSocket.userName} (${authSocket.userId})`);
@@ -85,3 +117,6 @@ export function setupWebSocket(io: SocketIOServer): void {
 
   console.log('✅ WebSocket handlers initialized');
 }
+
+// Export Python bridge for use in routes
+export { pythonBridge };

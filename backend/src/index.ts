@@ -16,6 +16,7 @@ import chainRoutes from './api/routes/chains.js';
 import reasoningRoutes from './api/routes/reasoning.js';
 import refinementRoutes from './api/routes/refinement.js';
 import predictionRoutes from './api/routes/prediction.js';
+import llmRoutes from './api/routes/llm.js';
 import { errorHandler, notFoundHandler } from './api/middleware/errorHandler.js';
 import { authMiddleware } from './api/middleware/auth.js';
 import { swaggerSpec } from './api/swagger/config.js';
@@ -82,6 +83,7 @@ app.use('/api/chains', chainRoutes);
 app.use('/api/reasoning', reasoningRoutes);
 app.use('/api/refinement', refinementRoutes);
 app.use('/api/prediction', predictionRoutes);
+app.use('/api/llm', llmRoutes);
 
 // 404 handler
 app.use(notFoundHandler);
