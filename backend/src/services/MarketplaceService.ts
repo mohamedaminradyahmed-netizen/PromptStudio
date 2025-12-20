@@ -342,4 +342,26 @@ export class MarketplaceService {
   }
 
   // Get marketplace statistics
+  static async getStatistics() {
+    const [totalPrompts, totalReviews, categories] = await Promise.all([
+      prisma.marketplacePrompt.count({
+        where: { status: 'approved' }
+      }),
+      prisma.review.count(),
+      prisma.marketplacePrompt.groupBy({
+        by: ['category'],
+        where: { status: 'approved' },
+        _count: true,
+      }),
+    ]);
 
+    return {
+      totalPrompts,
+      totalReviews,
+      categoryCounts: categories.reduce((acc, cat) => {
+        acc[cat.category] = cat._count;
+        return acc;
+      }, {} as Record<string, number>),
+    };
+  }
+}

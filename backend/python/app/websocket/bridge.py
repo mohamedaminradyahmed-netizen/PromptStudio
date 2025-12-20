@@ -101,6 +101,11 @@ class WebSocketBridge:
 
         try:
             nodejs_url = settings.nodejs_ws_url.replace("ws://", "http://").replace("wss://", "https://")
+            # Add query parameter to identify as Python service
+            if "?" in nodejs_url:
+                nodejs_url += "&service=python_llm"
+            else:
+                nodejs_url += "?service=python_llm"
             logger.info(f"Connecting to Node.js backend at {nodejs_url}")
             await self.sio.connect(
                 nodejs_url,
