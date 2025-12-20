@@ -1,12 +1,37 @@
 import { Router, Request, Response } from 'express';
 import prisma from '../../lib/prisma.js';
 import { AuthRequest } from '../middleware/auth.js';
+import { asyncHandler, Errors } from '../middleware/errorHandler.js';
+import { validateBody, validateQuery, validateParams } from '../validation/middleware.js';
+import {
+  createSessionSchema,
+  updateSessionSchema,
+  inviteMemberSchema,
+  updateMemberSchema,
+  createSnapshotSchema,
+  paginationSchema,
+  idParamSchema,
+} from '../validation/schemas.js';
+import { z } from 'zod';
 
 const router = Router();
 
+// Schema for member params
+const memberParamsSchema = z.object({
+  id: z.string(),
+  memberId: z.string(),
+});
+
+// Schema for snapshot params
+const snapshotParamsSchema = z.object({
+  id: z.string(),
+  snapshotId: z.string(),
+});
+
 // Get all sessions for current user
-router.get('/', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/',
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     const sessions = await prisma.collaborationSession.findMany({
@@ -54,28 +79,16 @@ router.get('/', async (req: Request, res: Response) => {
         updatedAt: session.updatedAt.toISOString(),
       })),
     });
-  } catch (error) {
-    console.error('Get sessions error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to get sessions' },
-    });
-  }
-});
+  })
+);
 
 // Create new session
-router.post('/', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/',
+  validateBody(createSessionSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { name, description, content } = req.body;
-
-    if (!name) {
-      res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Session name is required' },
-      });
-      return;
-    }
 
     const session = await prisma.collaborationSession.create({
       data: {
@@ -131,18 +144,13 @@ router.post('/', async (req: Request, res: Response) => {
         updatedAt: session.updatedAt.toISOString(),
       },
     });
-  } catch (error) {
-    console.error('Create session error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to create session' },
-    });
-  }
-});
+  })
+);
 
 // Get session by ID
-router.get('/:id', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
 
@@ -171,11 +179,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     });
 
     if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Session not found' },
-      });
-      return;
+      throw Errors.notFound('Session');
     }
 
     // Check access
@@ -183,11 +187,7 @@ router.get('/:id', async (req: Request, res: Response) => {
     const isOwner = session.ownerId === authReq.userId;
 
     if (!isMember && !isOwner) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'You do not have access to this session' },
-      });
-      return;
+      throw Errors.forbidden('You do not have access to this session');
     }
 
     res.json({
@@ -227,18 +227,13 @@ router.get('/:id', async (req: Request, res: Response) => {
         updatedAt: session.updatedAt.toISOString(),
       },
     });
-  } catch (error) {
-    console.error('Get session error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to get session' },
-    });
-  }
-});
+  })
+);
 
 // Get session by share token (public)
-router.get('/share/:shareToken', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/share/:shareToken',
+  asyncHandler(async (req: Request, res: Response) => {
     const { shareToken } = req.params;
 
     const session = await prisma.collaborationSession.findUnique({
@@ -252,19 +247,11 @@ router.get('/share/:shareToken', async (req: Request, res: Response) => {
     });
 
     if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Session not found' },
-      });
-      return;
+      throw Errors.notFound('Session');
     }
 
     if (!session.isActive) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'SESSION_INACTIVE', message: 'This session is no longer active' },
-      });
-      return;
+      throw Errors.forbidden('This session is no longer active');
     }
 
     res.json({
@@ -282,18 +269,14 @@ router.get('/share/:shareToken', async (req: Request, res: Response) => {
         createdAt: session.createdAt.toISOString(),
       },
     });
-  } catch (error) {
-    console.error('Get shared session error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to get session' },
-    });
-  }
-});
+  })
+);
 
 // Update session
-router.patch('/:id', async (req: Request, res: Response) => {
-  try {
+router.patch(
+  '/:id',
+  validateBody(updateSessionSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
     const { name, description, isActive } = req.body;
@@ -304,19 +287,11 @@ router.patch('/:id', async (req: Request, res: Response) => {
     });
 
     if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Session not found' },
-      });
-      return;
+      throw Errors.notFound('Session');
     }
 
     if (session.ownerId !== authReq.userId) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'Only the owner can update this session' },
-      });
-      return;
+      throw Errors.forbidden('Only the owner can update this session');
     }
 
     const updatedSession = await prisma.collaborationSession.update({
@@ -332,18 +307,13 @@ router.patch('/:id', async (req: Request, res: Response) => {
       success: true,
       data: updatedSession,
     });
-  } catch (error) {
-    console.error('Update session error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to update session' },
-    });
-  }
-});
+  })
+);
 
 // Delete session
-router.delete('/:id', async (req: Request, res: Response) => {
-  try {
+router.delete(
+  '/:id',
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
 
@@ -352,19 +322,11 @@ router.delete('/:id', async (req: Request, res: Response) => {
     });
 
     if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Session not found' },
-      });
-      return;
+      throw Errors.notFound('Session');
     }
 
     if (session.ownerId !== authReq.userId) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'Only the owner can delete this session' },
-      });
-      return;
+      throw Errors.forbidden('Only the owner can delete this session');
     }
 
     await prisma.collaborationSession.delete({
@@ -375,18 +337,14 @@ router.delete('/:id', async (req: Request, res: Response) => {
       success: true,
       data: { message: 'Session deleted successfully' },
     });
-  } catch (error) {
-    console.error('Delete session error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to delete session' },
-    });
-  }
-});
+  })
+);
 
 // Invite member
-router.post('/:id/members', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/:id/members',
+  validateBody(inviteMemberSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
     const { email, role } = req.body;
@@ -396,19 +354,11 @@ router.post('/:id/members', async (req: Request, res: Response) => {
     });
 
     if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Session not found' },
-      });
-      return;
+      throw Errors.notFound('Session');
     }
 
     if (session.ownerId !== authReq.userId) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'Only the owner can invite members' },
-      });
-      return;
+      throw Errors.forbidden('Only the owner can invite members');
     }
 
     // Find user by email
@@ -417,11 +367,7 @@ router.post('/:id/members', async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
-      });
-      return;
+      throw Errors.notFound('User');
     }
 
     // Check if already a member
@@ -435,11 +381,7 @@ router.post('/:id/members', async (req: Request, res: Response) => {
     });
 
     if (existingMember) {
-      res.status(409).json({
-        success: false,
-        error: { code: 'ALREADY_MEMBER', message: 'User is already a member' },
-      });
-      return;
+      throw Errors.conflict('User is already a member');
     }
 
     const member = await prisma.sessionMember.create({
@@ -466,18 +408,15 @@ router.post('/:id/members', async (req: Request, res: Response) => {
         },
       },
     });
-  } catch (error) {
-    console.error('Invite member error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to invite member' },
-    });
-  }
-});
+  })
+);
 
 // Update member role
-router.patch('/:id/members/:memberId', async (req: Request, res: Response) => {
-  try {
+router.patch(
+  '/:id/members/:memberId',
+  validateParams(memberParamsSchema),
+  validateBody(updateMemberSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id, memberId } = req.params;
     const { role } = req.body;
@@ -487,11 +426,7 @@ router.patch('/:id/members/:memberId', async (req: Request, res: Response) => {
     });
 
     if (!session || session.ownerId !== authReq.userId) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'Only the owner can update member roles' },
-      });
-      return;
+      throw Errors.forbidden('Only the owner can update member roles');
     }
 
     const member = await prisma.sessionMember.update({
@@ -504,18 +439,14 @@ router.patch('/:id/members/:memberId', async (req: Request, res: Response) => {
       success: true,
       data: member,
     });
-  } catch (error) {
-    console.error('Update member error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to update member' },
-    });
-  }
-});
+  })
+);
 
 // Remove member
-router.delete('/:id/members/:memberId', async (req: Request, res: Response) => {
-  try {
+router.delete(
+  '/:id/members/:memberId',
+  validateParams(memberParamsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id, memberId } = req.params;
 
@@ -524,11 +455,7 @@ router.delete('/:id/members/:memberId', async (req: Request, res: Response) => {
     });
 
     if (!session || session.ownerId !== authReq.userId) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'Only the owner can remove members' },
-      });
-      return;
+      throw Errors.forbidden('Only the owner can remove members');
     }
 
     await prisma.sessionMember.delete({
@@ -539,21 +466,17 @@ router.delete('/:id/members/:memberId', async (req: Request, res: Response) => {
       success: true,
       data: { message: 'Member removed successfully' },
     });
-  } catch (error) {
-    console.error('Remove member error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to remove member' },
-    });
-  }
-});
+  })
+);
 
 // Get edit history
-router.get('/:id/history', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/:id/history',
+  validateQuery(paginationSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
-    const { page = 1, pageSize = 50 } = req.query;
+    const { page, pageSize } = req.query as { page: number; pageSize: number };
 
     // Verify access
     const member = await prisma.sessionMember.findUnique({
@@ -570,14 +493,10 @@ router.get('/:id/history', async (req: Request, res: Response) => {
     });
 
     if (!member && session?.ownerId !== authReq.userId) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'You do not have access to this session' },
-      });
-      return;
+      throw Errors.forbidden('You do not have access to this session');
     }
 
-    const skip = (Number(page) - 1) * Number(pageSize);
+    const skip = (page - 1) * pageSize;
 
     const [history, total] = await Promise.all([
       prisma.editHistory.findMany({
@@ -585,7 +504,7 @@ router.get('/:id/history', async (req: Request, res: Response) => {
         include: { user: true },
         orderBy: { timestamp: 'desc' },
         skip,
-        take: Number(pageSize),
+        take: pageSize,
       }),
       prisma.editHistory.count({ where: { sessionId: id } }),
     ]);
@@ -594,24 +513,20 @@ router.get('/:id/history', async (req: Request, res: Response) => {
       success: true,
       data: history,
       meta: {
-        page: Number(page),
-        pageSize: Number(pageSize),
+        page,
+        pageSize,
         total,
         hasMore: skip + history.length < total,
       },
     });
-  } catch (error) {
-    console.error('Get history error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to get history' },
-    });
-  }
-});
+  })
+);
 
 // Create snapshot
-router.post('/:id/snapshots', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/:id/snapshots',
+  validateBody(createSnapshotSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id } = req.params;
     const { name } = req.body;
@@ -631,22 +546,14 @@ router.post('/:id/snapshots', async (req: Request, res: Response) => {
     });
 
     if (!session) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Session not found' },
-      });
-      return;
+      throw Errors.notFound('Session');
     }
 
     const isOwner = session.ownerId === authReq.userId;
     const isEditor = member?.role === 'EDITOR' || member?.role === 'OWNER';
 
     if (!isOwner && !isEditor) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'You do not have permission to create snapshots' },
-      });
-      return;
+      throw Errors.forbidden('You do not have permission to create snapshots');
     }
 
     const snapshot = await prisma.sessionSnapshot.create({
@@ -661,18 +568,14 @@ router.post('/:id/snapshots', async (req: Request, res: Response) => {
       success: true,
       data: snapshot,
     });
-  } catch (error) {
-    console.error('Create snapshot error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to create snapshot' },
-    });
-  }
-});
+  })
+);
 
 // Restore snapshot
-router.post('/:id/snapshots/:snapshotId/restore', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/:id/snapshots/:snapshotId/restore',
+  validateParams(snapshotParamsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
     const { id, snapshotId } = req.params;
 
@@ -682,11 +585,7 @@ router.post('/:id/snapshots/:snapshotId/restore', async (req: Request, res: Resp
     });
 
     if (!session || session.ownerId !== authReq.userId) {
-      res.status(403).json({
-        success: false,
-        error: { code: 'ACCESS_DENIED', message: 'Only the owner can restore snapshots' },
-      });
-      return;
+      throw Errors.forbidden('Only the owner can restore snapshots');
     }
 
     const snapshot = await prisma.sessionSnapshot.findUnique({
@@ -694,11 +593,7 @@ router.post('/:id/snapshots/:snapshotId/restore', async (req: Request, res: Resp
     });
 
     if (!snapshot || snapshot.sessionId !== id) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'NOT_FOUND', message: 'Snapshot not found' },
-      });
-      return;
+      throw Errors.notFound('Snapshot');
     }
 
     // Update session content
@@ -725,13 +620,7 @@ router.post('/:id/snapshots/:snapshotId/restore', async (req: Request, res: Resp
       success: true,
       data: { message: 'Snapshot restored successfully', content: snapshot.content },
     });
-  } catch (error) {
-    console.error('Restore snapshot error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to restore snapshot' },
-    });
-  }
-});
+  })
+);
 
 export { router as sessionRouter };

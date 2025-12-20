@@ -1,12 +1,109 @@
 import { Router, Request, Response } from 'express';
-import { RAGService } from '../../services/RAGService';
-import { adaptiveRAGService } from '../../services/AdaptiveRAGService';
+import { RAGService } from '../../services/RAGService.js';
+import { adaptiveRAGService } from '../../services/AdaptiveRAGService.js';
+import { asyncHandler, Errors } from '../middleware/errorHandler.js';
+import { validateBody, validateParams } from '../validation/middleware.js';
+import { z } from 'zod';
 
 const router = Router();
 
+// Validation Schemas
+const createKnowledgeBaseSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200),
+  description: z.string().max(1000).optional(),
+  domain: z.string().optional(),
+  embeddingModel: z.string().optional(),
+  chunkSize: z.number().int().min(100).max(4000).optional(),
+  chunkOverlap: z.number().int().min(0).max(500).optional(),
+});
+
+const addDocumentsSchema = z.object({
+  documents: z.array(z.object({
+    content: z.string().min(1),
+    metadata: z.record(z.any()).optional(),
+    source: z.string().optional(),
+  })).min(1, 'At least one document is required'),
+});
+
+const retrieveContextSchema = z.object({
+  query: z.string().min(1, 'Query is required'),
+  topK: z.number().int().min(1).max(20).optional(),
+  minRelevance: z.number().min(0).max(1).optional(),
+  minTrust: z.number().min(0).max(1).optional(),
+});
+
+const buildPromptSchema = z.object({
+  originalPrompt: z.string().min(1, 'Original prompt is required'),
+  knowledgeBaseId: z.string().min(1, 'Knowledge base ID is required'),
+  query: z.string().min(1, 'Query is required'),
+  options: z.object({
+    topK: z.number().int().min(1).max(20).optional(),
+    minRelevance: z.number().min(0).max(1).optional(),
+    includeMetadata: z.boolean().optional(),
+  }).optional(),
+});
+
+const updateTrustScoresSchema = z.object({
+  feedback: z.array(z.object({
+    documentId: z.string(),
+    score: z.number().min(-1).max(1),
+    reason: z.string().optional(),
+  })),
+});
+
+const chunkTextSchema = z.object({
+  text: z.string().min(1, 'Text is required'),
+  chunkSize: z.number().int().min(100).max(4000).optional(),
+  overlap: z.number().int().min(0).max(500).optional(),
+});
+
+const adaptiveRetrieveSchema = z.object({
+  knowledgeBaseId: z.string().min(1, 'Knowledge base ID is required'),
+  query: z.string().min(1, 'Query is required'),
+  maxChunks: z.number().int().min(1).max(20).default(5),
+  minRelevance: z.number().min(0).max(1).default(0.7),
+  minTrust: z.number().min(0).max(1).default(0.5),
+  enableSummarization: z.boolean().default(true),
+  maxContextLength: z.number().int().positive().default(4000),
+  includeSourceTrace: z.boolean().default(true),
+});
+
+const contextMaskSchema = z.object({
+  knowledgeBaseId: z.string().min(1, 'Knowledge base ID is required'),
+  trustThreshold: z.number().min(0).max(1).default(0.5),
+  verifiedOnly: z.boolean().default(false),
+  allowedDomains: z.array(z.string()).default([]),
+  blockedDomains: z.array(z.string()).default([]),
+});
+
+const trustedSourceSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  domain: z.string().optional(),
+  url: z.string().url().optional(),
+  sourceType: z.enum(['document', 'api', 'database', 'web']).default('document'),
+  baseTrustScore: z.number().min(0).max(1).default(0.8),
+  autoVerify: z.boolean().default(false),
+});
+
+const summarizeChunksSchema = z.object({
+  chunks: z.array(z.object({
+    content: z.string(),
+    relevanceScore: z.number().optional(),
+    trustScore: z.number().optional(),
+    source: z.string().optional(),
+  })).min(1, 'Chunks array is required'),
+  query: z.string().min(1, 'Query is required'),
+});
+
+const idParamSchema = z.object({
+  id: z.string().min(1),
+});
+
 // Create knowledge base
-router.post('/knowledge-bases', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases',
+  validateBody(createKnowledgeBaseSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { name, description, domain, embeddingModel, chunkSize, chunkOverlap } = req.body;
 
     const knowledgeBase = await RAGService.createKnowledgeBase({
@@ -18,29 +115,31 @@ router.post('/knowledge-bases', async (req: Request, res: Response) => {
       chunkOverlap,
     });
 
-    res.json(knowledgeBase);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create knowledge base' });
-  }
-});
+    res.json({ success: true, data: knowledgeBase });
+  })
+);
 
 // Add documents to knowledge base
-router.post('/knowledge-bases/:id/documents', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/documents',
+  validateParams(idParamSchema),
+  validateBody(addDocumentsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { documents } = req.body;
 
     const addedDocs = await RAGService.addToKnowledgeBase(id, documents);
 
-    res.json({ count: addedDocs.length, documents: addedDocs });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to add documents' });
-  }
-});
+    res.json({ success: true, data: { count: addedDocs.length, documents: addedDocs } });
+  })
+);
 
 // Retrieve context for query
-router.post('/knowledge-bases/:id/retrieve', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/retrieve',
+  validateParams(idParamSchema),
+  validateBody(retrieveContextSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { query, topK, minRelevance, minTrust } = req.body;
 
@@ -50,77 +149,71 @@ router.post('/knowledge-bases/:id/retrieve', async (req: Request, res: Response)
       minTrust,
     });
 
-    res.json(context);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to retrieve context' });
-  }
-});
+    res.json({ success: true, data: context });
+  })
+);
 
 // Build RAG-enhanced prompt
-router.post('/build-prompt', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/build-prompt',
+  validateBody(buildPromptSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { originalPrompt, knowledgeBaseId, query, options } = req.body;
 
     const context = await RAGService.retrieveContext(knowledgeBaseId, query, options);
     const ragPrompt = RAGService.buildRAGPrompt(originalPrompt, context, options);
 
-    res.json({ ragPrompt, context });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to build RAG prompt' });
-  }
-});
+    res.json({ success: true, data: { ragPrompt, context } });
+  })
+);
 
 // Update trust scores
-router.post('/knowledge-bases/:id/trust-scores', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/trust-scores',
+  validateParams(idParamSchema),
+  validateBody(updateTrustScoresSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { feedback } = req.body;
 
     await RAGService.updateTrustScores(id, feedback);
 
-    res.json({ success: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update trust scores' });
-  }
-});
+    res.json({ success: true, message: 'Trust scores updated' });
+  })
+);
 
 // Chunk text
-router.post('/chunk', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/chunk',
+  validateBody(chunkTextSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { text, chunkSize, overlap } = req.body;
 
     const chunks = RAGService.chunkText(text, { chunkSize, overlap });
 
-    res.json({ chunks, count: chunks.length });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to chunk text' });
-  }
-});
+    res.json({ success: true, data: { chunks, count: chunks.length } });
+  })
+);
 
 // ==================== Adaptive RAG Endpoints ====================
 
 /**
  * Retrieve adaptive context with dynamic context packing
- * استرجاع سياق تكيفي مع حزم سياق ديناميكية
  */
-router.post('/adaptive/retrieve', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/retrieve',
+  validateBody(adaptiveRetrieveSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const {
       knowledgeBaseId,
       query,
-      maxChunks = 5,
-      minRelevance = 0.7,
-      minTrust = 0.5,
-      enableSummarization = true,
-      maxContextLength = 4000,
-      includeSourceTrace = true,
+      maxChunks,
+      minRelevance,
+      minTrust,
+      enableSummarization,
+      maxContextLength,
+      includeSourceTrace,
     } = req.body;
-
-    if (!knowledgeBaseId || !query) {
-      return res.status(400).json({
-        error: 'knowledgeBaseId and query are required',
-      });
-    }
 
     const result = await adaptiveRAGService.retrieveAdaptiveContext(
       knowledgeBaseId,
@@ -135,33 +228,24 @@ router.post('/adaptive/retrieve', async (req: Request, res: Response) => {
       }
     );
 
-    res.json(result);
-  } catch (error) {
-    console.error('Adaptive RAG retrieval error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve adaptive context',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 /**
  * Build context mask for trusted sources
- * بناء ماسك سياق للمصادر الموثوقة
  */
-router.post('/adaptive/context-mask', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/context-mask',
+  validateBody(contextMaskSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const {
       knowledgeBaseId,
-      trustThreshold = 0.5,
-      verifiedOnly = false,
-      allowedDomains = [],
-      blockedDomains = [],
+      trustThreshold,
+      verifiedOnly,
+      allowedDomains,
+      blockedDomains,
     } = req.body;
-
-    if (!knowledgeBaseId) {
-      return res.status(400).json({ error: 'knowledgeBaseId is required' });
-    }
 
     const contextMask = await adaptiveRAGService.buildContextMask(
       knowledgeBaseId,
@@ -173,52 +257,43 @@ router.post('/adaptive/context-mask', async (req: Request, res: Response) => {
       }
     );
 
-    res.json(contextMask);
-  } catch (error) {
-    console.error('Context mask error:', error);
-    res.status(500).json({ error: 'Failed to build context mask' });
-  }
-});
+    res.json({ success: true, data: contextMask });
+  })
+);
 
 /**
  * Get RAG session history
- * الحصول على سجل جلسة RAG
  */
-router.get('/adaptive/sessions/:sessionId', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/adaptive/sessions/:sessionId',
+  asyncHandler(async (req: Request, res: Response) => {
     const { sessionId } = req.params;
 
     const session = await adaptiveRAGService.getSessionHistory(sessionId);
 
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      throw Errors.notFound('Session');
     }
 
-    res.json(session);
-  } catch (error) {
-    console.error('Session history error:', error);
-    res.status(500).json({ error: 'Failed to retrieve session history' });
-  }
-});
+    res.json({ success: true, data: session });
+  })
+);
 
 /**
  * Register a trusted source
- * تسجيل مصدر موثوق
  */
-router.post('/adaptive/trusted-sources', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/trusted-sources',
+  validateBody(trustedSourceSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const {
       name,
       domain,
       url,
-      sourceType = 'document',
-      baseTrustScore = 0.8,
-      autoVerify = false,
+      sourceType,
+      baseTrustScore,
+      autoVerify,
     } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'name is required' });
-    }
 
     const trustedSource = await adaptiveRAGService.registerTrustedSource({
       name,
@@ -229,43 +304,30 @@ router.post('/adaptive/trusted-sources', async (req: Request, res: Response) => 
       autoVerify,
     });
 
-    res.json(trustedSource);
-  } catch (error) {
-    console.error('Register trusted source error:', error);
-    res.status(500).json({
-      error: 'Failed to register trusted source',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+    res.json({ success: true, data: trustedSource });
+  })
+);
 
 /**
  * Summarize chunks with confidence indicators
- * تلخيص المقتطفات مع مؤشرات الثقة
  */
-router.post('/adaptive/summarize', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/summarize',
+  validateBody(summarizeChunksSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { chunks, query } = req.body;
-
-    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
-      return res.status(400).json({ error: 'chunks array is required' });
-    }
-
-    if (!query) {
-      return res.status(400).json({ error: 'query is required' });
-    }
 
     const enrichedChunks = await adaptiveRAGService.summarizeChunks(chunks, query);
 
     res.json({
-      enrichedChunks,
-      count: enrichedChunks.length,
-      avgConfidence: enrichedChunks.reduce((sum, c) => sum + c.confidenceScore, 0) / enrichedChunks.length,
+      success: true,
+      data: {
+        enrichedChunks,
+        count: enrichedChunks.length,
+        avgConfidence: enrichedChunks.reduce((sum, c) => sum + c.confidenceScore, 0) / enrichedChunks.length,
+      },
     });
-  } catch (error) {
-    console.error('Summarize chunks error:', error);
-    res.status(500).json({ error: 'Failed to summarize chunks' });
-  }
-});
+  })
+);
 
 export default router;
