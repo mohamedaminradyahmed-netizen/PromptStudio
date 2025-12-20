@@ -251,4 +251,135 @@ export class PromptService {
       },
     });
   }
+
+  /**
+   * Get prompt with all versions for refinement history
+   */
+  static async getPromptWithHistory(promptId: string) {
+    return await prisma.marketplacePrompt.findUnique({
+      where: { id: promptId },
+      include: {
+        promptVersions: {
+          orderBy: { version: 'desc' },
+        },
+      },
+    });
+  }
+
+  /**
+   * Get version diff between two versions
+   */
+  static async getVersionDiff(promptId: string, fromVersion: number, toVersion: number) {
+    const [from, to] = await Promise.all([
+      prisma.promptVersion.findFirst({
+        where: { promptId, version: fromVersion },
+      }),
+      prisma.promptVersion.findFirst({
+        where: { promptId, version: toVersion },
+      }),
+    ]);
+
+    if (!from || !to) {
+      throw new Error('One or both versions not found');
+    }
+
+    const comparison = this.compareVersions(from.content, to.content);
+
+    return {
+      from: {
+        version: from.version,
+        content: from.content,
+        qualityScore: from.qualityScore,
+        createdAt: from.createdAt,
+      },
+      to: {
+        version: to.version,
+        content: to.content,
+        qualityScore: to.qualityScore,
+        createdAt: to.createdAt,
+      },
+      diff: comparison,
+      improvement: (to.qualityScore || 0) - (from.qualityScore || 0),
+    };
+  }
+
+  /**
+   * Create initial version when enabling self-refinement
+   */
+  static async initializeVersionHistory(promptId: string) {
+    const prompt = await prisma.marketplacePrompt.findUnique({
+      where: { id: promptId },
+    });
+
+    if (!prompt) {
+      throw new Error('Prompt not found');
+    }
+
+    // Check if version 1 already exists
+    const existingVersion = await prisma.promptVersion.findFirst({
+      where: { promptId, version: 1 },
+    });
+
+    if (existingVersion) {
+      return existingVersion;
+    }
+
+    // Create initial version
+    return await prisma.promptVersion.create({
+      data: {
+        promptId,
+        version: 1,
+        content: prompt.content,
+        systemPrompt: prompt.systemPrompt,
+        processPrompt: prompt.processPrompt,
+        taskPrompt: prompt.taskPrompt,
+        outputPrompt: prompt.outputPrompt,
+        qualityScore: prompt.successProbability,
+        refinementReason: 'Initial version',
+      },
+    });
+  }
+
+  /**
+   * Get refinement analytics for a prompt
+   */
+  static async getRefinementAnalytics(promptId: string) {
+    const versions = await prisma.promptVersion.findMany({
+      where: { promptId },
+      orderBy: { version: 'asc' },
+    });
+
+    if (versions.length === 0) {
+      return null;
+    }
+
+    const firstVersion = versions[0];
+    const latestVersion = versions[versions.length - 1];
+
+    const totalImprovement = (latestVersion.qualityScore || 0) - (firstVersion.qualityScore || 0);
+    const averageImprovement = versions.length > 1
+      ? totalImprovement / (versions.length - 1)
+      : 0;
+
+    const scoreHistory = versions.map(v => ({
+      version: v.version,
+      score: v.qualityScore || 0,
+      createdAt: v.createdAt,
+    }));
+
+    return {
+      totalVersions: versions.length,
+      initialScore: firstVersion.qualityScore || 0,
+      currentScore: latestVersion.qualityScore || 0,
+      totalImprovement,
+      averageImprovement,
+      scoreHistory,
+      refinementReasons: versions
+        .filter(v => v.refinementReason)
+        .map(v => ({
+          version: v.version,
+          reason: v.refinementReason,
+        })),
+    };
+  }
 }
