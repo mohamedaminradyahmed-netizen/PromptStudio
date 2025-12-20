@@ -7,6 +7,7 @@ from .chains import router as chains_router
 from .embeddings import router as embeddings_router
 from .templates import router as templates_router
 from .batch import router as batch_router
+from .rag import router as rag_router
 
 __all__ = [
     "llm_router",
@@ -16,4 +17,5 @@ __all__ = [
     "embeddings_router",
     "templates_router",
     "batch_router",
+    "rag_router",
 ]

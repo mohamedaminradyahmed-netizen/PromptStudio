@@ -7,6 +7,7 @@ Main entry point for the Python backend service that provides:
 - WebSocket bridge to Node.js backend
 - REST API for LLM operations
 - Prompt chains, embeddings, templates, and batch processing
+- RAG system with pgvector for document retrieval
 """
 
 import asyncio
@@ -17,6 +18,7 @@ from loguru import logger
 
 from .core.config import settings
 from .core.logging import setup_logging
+from .core.database import database
 from .api.routes import (
     llm_router,
     commands_router,
@@ -25,6 +27,7 @@ from .api.routes import (
     embeddings_router,
     templates_router,
     batch_router,
+    rag_router,
 )
 from .api.routes.agents import router as agents_router
 from .websocket.bridge import bridge
@@ -36,6 +39,7 @@ from .services.prompt_chain_service import PromptChainService
 from .services.embedding_service import EmbeddingService
 from .services.template_service import TemplateService
 from .services.batch_service import BatchService
+from .services.rag_service import RAGService
 
 
 # Setup logging
@@ -48,11 +52,19 @@ async def lifespan(app: FastAPI):
     Application lifespan manager
 
     Handles startup and shutdown events:
+    - Initialize database with pgvector
     - Initialize all services
     - Connect to Node.js backend on startup
     - Disconnect on shutdown
     """
     logger.info("Starting PromptStudio Python Backend...")
+
+    # Initialize database with pgvector support
+    try:
+        await database.init()
+        logger.info("Database initialized with pgvector support")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
 
     # Initialize services
     llm_service = LLMService()
@@ -62,6 +74,7 @@ async def lifespan(app: FastAPI):
     embedding_service = EmbeddingService()
     template_service = TemplateService()
     batch_service = BatchService(llm_service, instructor_service)
+    rag_service = RAGService()
 
     # Setup WebSocket handlers
     handlers = WebSocketHandlers(
@@ -79,6 +92,7 @@ async def lifespan(app: FastAPI):
     app.state.embedding_service = embedding_service
     app.state.template_service = template_service
     app.state.batch_service = batch_service
+    app.state.rag_service = rag_service
     app.state.handlers = handlers
 
     # Store services dict for agents
@@ -101,6 +115,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Python backend...")
     await bridge.disconnect_from_nodejs()
+    await database.close()
 
 
 # Create FastAPI application
@@ -125,6 +140,9 @@ app = FastAPI(
     - **Prompt Analysis**: Analyze prompts for quality and safety
     - **Translation**: Multi-language prompt translation
     - **Cost Prediction**: Pre-send cost estimation
+    - **RAG System**: Document ingestion and semantic retrieval with pgvector
+    - **Vector Search**: Hybrid search combining similarity and trust scores
+    - **Knowledge Bases**: Organize documents in searchable collections
 
     ## Agent Framework
 
@@ -156,6 +174,7 @@ app.include_router(chains_router, prefix="/api")
 app.include_router(embeddings_router, prefix="/api")
 app.include_router(templates_router, prefix="/api")
 app.include_router(batch_router, prefix="/api")
+app.include_router(rag_router, prefix="/api")
 
 
 # WebSocket endpoint for direct client connections
@@ -187,6 +206,7 @@ async def root():
             "embeddings": "/api/embeddings",
             "templates": "/api/templates",
             "batch": "/api/batch",
+            "rag": "/api/rag",
         },
     }
 

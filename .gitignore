@@ -81,3 +81,18 @@ dump.rdb
 **/.turbo
 **/.vercel
 **/.netlify
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+*.egg
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+venv/
+.venv/

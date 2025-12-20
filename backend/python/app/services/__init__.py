@@ -1,7 +1,7 @@
 """
 PromptStudio Python Services
 
-Core services for LLM operations, structured outputs, and prompt management.
+Core services for LLM operations, structured outputs, prompt management, and RAG.
 """
 
 from .llm_service import LLMService
@@ -42,6 +42,7 @@ from .batch_service import (
     BatchProgress,
     BatchStatus,
 )
+from .rag_service import RAGService
 
 __all__ = [
     # Core Services
@@ -79,4 +80,6 @@ __all__ = [
     "BatchItemResult",
     "BatchProgress",
     "BatchStatus",
+    # RAG Service
+    "RAGService",
 ]
