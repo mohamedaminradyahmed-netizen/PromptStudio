@@ -1,0 +1,483 @@
+"""
+Embedding Service
+
+Generate vector embeddings using OpenAI, local models, or other providers.
+Supports semantic search, similarity scoring, and clustering.
+"""
+
+import hashlib
+import time
+from typing import Optional, List, Dict, Any, Tuple
+from enum import Enum
+import numpy as np
+from pydantic import BaseModel, Field
+from loguru import logger
+
+from ..core.config import settings
+
+
+class EmbeddingProvider(str, Enum):
+    """Supported embedding providers"""
+    OPENAI = "openai"
+    COHERE = "cohere"
+    LOCAL = "local"  # Sentence transformers
+
+
+class EmbeddingModel(str, Enum):
+    """Available embedding models"""
+    # OpenAI models
+    TEXT_EMBEDDING_3_SMALL = "text-embedding-3-small"
+    TEXT_EMBEDDING_3_LARGE = "text-embedding-3-large"
+    TEXT_EMBEDDING_ADA_002 = "text-embedding-ada-002"
+    # Cohere models
+    EMBED_ENGLISH_V3 = "embed-english-v3.0"
+    EMBED_MULTILINGUAL_V3 = "embed-multilingual-v3.0"
+    # Local models
+    ALL_MINILM_L6_V2 = "all-MiniLM-L6-v2"
+    ALL_MPNET_BASE_V2 = "all-mpnet-base-v2"
+
+
+class EmbeddingRequest(BaseModel):
+    """Request for generating embeddings"""
+    texts: List[str] = Field(description="Texts to embed")
+    model: Optional[str] = Field(default=None, description="Model to use")
+    provider: Optional[EmbeddingProvider] = None
+    dimensions: Optional[int] = Field(default=None, description="Output dimensions (if supported)")
+    normalize: bool = Field(default=True, description="Normalize vectors to unit length")
+
+
+class EmbeddingResult(BaseModel):
+    """Result of embedding generation"""
+    embeddings: List[List[float]]
+    model: str
+    provider: str
+    dimensions: int
+    total_tokens: int
+    latency_ms: float
+
+
+class SimilarityResult(BaseModel):
+    """Result of similarity search"""
+    text: str
+    score: float
+    index: int
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class ClusterResult(BaseModel):
+    """Result of clustering"""
+    cluster_id: int
+    texts: List[str]
+    centroid: List[float]
+    size: int
+
+
+class EmbeddingService:
+    """
+    Service for generating and working with vector embeddings
+
+    Features:
+    - Multi-provider support (OpenAI, Cohere, local)
+    - Embedding caching
+    - Similarity search
+    - Clustering
+    - Dimensionality reduction
+    """
+
+    def __init__(self):
+        self.default_provider = EmbeddingProvider.OPENAI
+        self.default_model = EmbeddingModel.TEXT_EMBEDDING_3_SMALL.value
+        self._cache: Dict[str, List[float]] = {}
+        self._local_model = None
+
+    def _get_cache_key(self, text: str, model: str) -> str:
+        """Generate cache key for text-model pair"""
+        content = f"{text}:{model}"
+        return hashlib.md5(content.encode()).hexdigest()
+
+    async def embed(self, request: EmbeddingRequest) -> EmbeddingResult:
+        """
+        Generate embeddings for texts
+
+        Args:
+            request: Embedding request with texts and configuration
+
+        Returns:
+            EmbeddingResult with embeddings and metrics
+        """
+        provider = request.provider or self.default_provider
+        model = request.model or self.default_model
+        start_time = time.time()
+
+        try:
+            if provider == EmbeddingProvider.OPENAI:
+                result = await self._embed_openai(request.texts, model, request.dimensions)
+            elif provider == EmbeddingProvider.COHERE:
+                result = await self._embed_cohere(request.texts, model)
+            elif provider == EmbeddingProvider.LOCAL:
+                result = await self._embed_local(request.texts, model)
+            else:
+                raise ValueError(f"Unsupported provider: {provider}")
+
+            embeddings = result["embeddings"]
+
+            # Normalize if requested
+            if request.normalize:
+                embeddings = self._normalize_vectors(embeddings)
+
+            latency_ms = (time.time() - start_time) * 1000
+
+            return EmbeddingResult(
+                embeddings=embeddings,
+                model=model,
+                provider=provider.value,
+                dimensions=len(embeddings[0]) if embeddings else 0,
+                total_tokens=result.get("total_tokens", 0),
+                latency_ms=latency_ms,
+            )
+
+        except Exception as e:
+            logger.error(f"Embedding generation failed: {e}")
+            raise
+
+    async def _embed_openai(
+        self,
+        texts: List[str],
+        model: str,
+        dimensions: Optional[int] = None,
+    ) -> Dict[str, Any]:
+        """Generate embeddings using OpenAI"""
+        from openai import AsyncOpenAI
+
+        client = AsyncOpenAI(api_key=settings.openai_api_key)
+
+        kwargs = {"model": model, "input": texts}
+        if dimensions and model in ["text-embedding-3-small", "text-embedding-3-large"]:
+            kwargs["dimensions"] = dimensions
+
+        response = await client.embeddings.create(**kwargs)
+
+        embeddings = [item.embedding for item in response.data]
+        total_tokens = response.usage.total_tokens
+
+        return {
+            "embeddings": embeddings,
+            "total_tokens": total_tokens,
+        }
+
+    async def _embed_cohere(
+        self,
+        texts: List[str],
+        model: str,
+    ) -> Dict[str, Any]:
+        """Generate embeddings using Cohere"""
+        try:
+            import cohere
+
+            client = cohere.AsyncClient(api_key=settings.cohere_api_key)
+            response = await client.embed(
+                texts=texts,
+                model=model,
+                input_type="search_document",
+            )
+
+            return {
+                "embeddings": response.embeddings,
+                "total_tokens": len(texts) * 100,  # Approximate
+            }
+        except ImportError:
+            raise ValueError("Cohere library not installed. Run: pip install cohere")
+
+    async def _embed_local(
+        self,
+        texts: List[str],
+        model: str,
+    ) -> Dict[str, Any]:
+        """Generate embeddings using local sentence transformers"""
+        try:
+            from sentence_transformers import SentenceTransformer
+
+            if self._local_model is None or self._local_model.get_config_dict().get("name") != model:
+                self._local_model = SentenceTransformer(model)
+
+            embeddings = self._local_model.encode(texts, convert_to_numpy=True).tolist()
+
+            return {
+                "embeddings": embeddings,
+                "total_tokens": sum(len(t.split()) for t in texts),
+            }
+        except ImportError:
+            raise ValueError("sentence-transformers not installed. Run: pip install sentence-transformers")
+
+    def _normalize_vectors(self, vectors: List[List[float]]) -> List[List[float]]:
+        """Normalize vectors to unit length"""
+        normalized = []
+        for vec in vectors:
+            arr = np.array(vec)
+            norm = np.linalg.norm(arr)
+            if norm > 0:
+                normalized.append((arr / norm).tolist())
+            else:
+                normalized.append(vec)
+        return normalized
+
+    def cosine_similarity(
+        self,
+        vec1: List[float],
+        vec2: List[float],
+    ) -> float:
+        """Calculate cosine similarity between two vectors"""
+        arr1 = np.array(vec1)
+        arr2 = np.array(vec2)
+        dot = np.dot(arr1, arr2)
+        norm1 = np.linalg.norm(arr1)
+        norm2 = np.linalg.norm(arr2)
+        if norm1 == 0 or norm2 == 0:
+            return 0.0
+        return float(dot / (norm1 * norm2))
+
+    def euclidean_distance(
+        self,
+        vec1: List[float],
+        vec2: List[float],
+    ) -> float:
+        """Calculate Euclidean distance between two vectors"""
+        arr1 = np.array(vec1)
+        arr2 = np.array(vec2)
+        return float(np.linalg.norm(arr1 - arr2))
+
+    async def semantic_search(
+        self,
+        query: str,
+        documents: List[str],
+        top_k: int = 5,
+        threshold: float = 0.0,
+        model: Optional[str] = None,
+    ) -> List[SimilarityResult]:
+        """
+        Perform semantic search over documents
+
+        Args:
+            query: Search query
+            documents: List of documents to search
+            top_k: Number of results to return
+            threshold: Minimum similarity threshold
+            model: Embedding model to use
+
+        Returns:
+            List of SimilarityResult sorted by score
+        """
+        # Generate embeddings
+        all_texts = [query] + documents
+        result = await self.embed(EmbeddingRequest(
+            texts=all_texts,
+            model=model,
+        ))
+
+        query_embedding = result.embeddings[0]
+        doc_embeddings = result.embeddings[1:]
+
+        # Calculate similarities
+        similarities = []
+        for i, (doc, embedding) in enumerate(zip(documents, doc_embeddings)):
+            score = self.cosine_similarity(query_embedding, embedding)
+            if score >= threshold:
+                similarities.append(SimilarityResult(
+                    text=doc,
+                    score=score,
+                    index=i,
+                ))
+
+        # Sort by score and return top_k
+        similarities.sort(key=lambda x: x.score, reverse=True)
+        return similarities[:top_k]
+
+    async def find_similar(
+        self,
+        text: str,
+        candidates: List[str],
+        top_k: int = 5,
+        model: Optional[str] = None,
+    ) -> List[SimilarityResult]:
+        """
+        Find texts most similar to the given text
+
+        Args:
+            text: Reference text
+            candidates: Candidate texts to compare
+            top_k: Number of results to return
+            model: Embedding model to use
+
+        Returns:
+            List of SimilarityResult sorted by similarity
+        """
+        return await self.semantic_search(
+            query=text,
+            documents=candidates,
+            top_k=top_k,
+            model=model,
+        )
+
+    async def cluster_texts(
+        self,
+        texts: List[str],
+        n_clusters: int = 5,
+        model: Optional[str] = None,
+    ) -> List[ClusterResult]:
+        """
+        Cluster texts by semantic similarity
+
+        Args:
+            texts: Texts to cluster
+            n_clusters: Number of clusters
+            model: Embedding model to use
+
+        Returns:
+            List of ClusterResult with clustered texts
+        """
+        try:
+            from sklearn.cluster import KMeans
+        except ImportError:
+            raise ValueError("scikit-learn not installed. Run: pip install scikit-learn")
+
+        # Generate embeddings
+        result = await self.embed(EmbeddingRequest(texts=texts, model=model))
+        embeddings = np.array(result.embeddings)
+
+        # Perform clustering
+        n_clusters = min(n_clusters, len(texts))
+        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+        labels = kmeans.fit_predict(embeddings)
+
+        # Group texts by cluster
+        clusters = {}
+        for i, (text, label) in enumerate(zip(texts, labels)):
+            if label not in clusters:
+                clusters[label] = {"texts": [], "indices": []}
+            clusters[label]["texts"].append(text)
+            clusters[label]["indices"].append(i)
+
+        # Build results
+        results = []
+        for cluster_id, data in clusters.items():
+            centroid = kmeans.cluster_centers_[cluster_id].tolist()
+            results.append(ClusterResult(
+                cluster_id=int(cluster_id),
+                texts=data["texts"],
+                centroid=centroid,
+                size=len(data["texts"]),
+            ))
+
+        return sorted(results, key=lambda x: x.size, reverse=True)
+
+    async def deduplicate(
+        self,
+        texts: List[str],
+        similarity_threshold: float = 0.95,
+        model: Optional[str] = None,
+    ) -> Tuple[List[str], List[Tuple[int, int, float]]]:
+        """
+        Deduplicate texts based on semantic similarity
+
+        Args:
+            texts: Texts to deduplicate
+            similarity_threshold: Threshold for considering texts as duplicates
+            model: Embedding model to use
+
+        Returns:
+            Tuple of (unique texts, list of duplicate pairs with similarity)
+        """
+        if len(texts) <= 1:
+            return texts, []
+
+        # Generate embeddings
+        result = await self.embed(EmbeddingRequest(texts=texts, model=model))
+        embeddings = result.embeddings
+
+        # Find duplicates
+        duplicates = []
+        keep_indices = set(range(len(texts)))
+
+        for i in range(len(texts)):
+            if i not in keep_indices:
+                continue
+            for j in range(i + 1, len(texts)):
+                if j not in keep_indices:
+                    continue
+                similarity = self.cosine_similarity(embeddings[i], embeddings[j])
+                if similarity >= similarity_threshold:
+                    duplicates.append((i, j, similarity))
+                    keep_indices.discard(j)
+
+        unique_texts = [texts[i] for i in sorted(keep_indices)]
+        return unique_texts, duplicates
+
+    async def reduce_dimensions(
+        self,
+        embeddings: List[List[float]],
+        target_dims: int = 2,
+        method: str = "pca",
+    ) -> List[List[float]]:
+        """
+        Reduce embedding dimensions for visualization
+
+        Args:
+            embeddings: High-dimensional embeddings
+            target_dims: Target number of dimensions
+            method: Reduction method (pca, tsne, umap)
+
+        Returns:
+            Reduced-dimension embeddings
+        """
+        arr = np.array(embeddings)
+
+        if method == "pca":
+            try:
+                from sklearn.decomposition import PCA
+                reducer = PCA(n_components=target_dims)
+                reduced = reducer.fit_transform(arr)
+            except ImportError:
+                raise ValueError("scikit-learn not installed")
+
+        elif method == "tsne":
+            try:
+                from sklearn.manifold import TSNE
+                reducer = TSNE(n_components=target_dims, random_state=42)
+                reduced = reducer.fit_transform(arr)
+            except ImportError:
+                raise ValueError("scikit-learn not installed")
+
+        elif method == "umap":
+            try:
+                import umap
+                reducer = umap.UMAP(n_components=target_dims, random_state=42)
+                reduced = reducer.fit_transform(arr)
+            except ImportError:
+                raise ValueError("umap-learn not installed. Run: pip install umap-learn")
+
+        else:
+            raise ValueError(f"Unknown reduction method: {method}")
+
+        return reduced.tolist()
+
+    def batch_similarity_matrix(
+        self,
+        embeddings: List[List[float]],
+    ) -> List[List[float]]:
+        """
+        Compute pairwise similarity matrix for all embeddings
+
+        Args:
+            embeddings: List of embeddings
+
+        Returns:
+            Similarity matrix where [i][j] is similarity between i and j
+        """
+        arr = np.array(embeddings)
+        # Normalize
+        norms = np.linalg.norm(arr, axis=1, keepdims=True)
+        norms[norms == 0] = 1
+        normalized = arr / norms
+        # Compute similarity matrix
+        similarity = np.dot(normalized, normalized.T)
+        return similarity.tolist()
