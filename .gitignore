@@ -67,8 +67,12 @@ secrets/
 config/production.json
 
 # Database dumps
-*.sql
 *.dump
+
+# SQL files (except prisma migrations and init scripts)
+*.sql
+!backend/prisma/*.sql
+!backend/prisma/migrations/**/*.sql
 
 # Redis
 dump.rdb
