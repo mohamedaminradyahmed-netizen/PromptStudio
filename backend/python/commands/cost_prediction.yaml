@@ -1,0 +1,68 @@
+# Cost Prediction Command
+# Predicts the cost of running a prompt before execution
+
+name: cost_prediction
+category: analysis
+description: Predict the cost of running a prompt before sending it to the LLM
+
+template: |
+  Analyze the following prompt and predict the API cost.
+
+  Prompt:
+  ---
+  {prompt}
+  ---
+
+  Target Model: {model}
+  Expected Output Length: {expected_output_length}
+
+  Provide:
+  1. Estimated input tokens
+  2. Estimated output tokens
+  3. Estimated cost in USD
+  4. Confidence level
+  5. Cost breakdown by component
+
+parameters:
+  - name: prompt
+    type: string
+    description: The prompt to analyze
+    required: true
+
+  - name: model
+    type: string
+    description: Target model for cost calculation
+    required: false
+    default: "gpt-4-turbo-preview"
+
+  - name: expected_output_length
+    type: string
+    description: Expected output length (short/medium/long)
+    required: false
+    default: "medium"
+    choices:
+      - short
+      - medium
+      - long
+
+output_schema: CostPrediction
+
+system_prompt: |
+  You are a cost analyst specializing in LLM API pricing.
+  Consider:
+  - Token count estimation accuracy
+  - Model-specific pricing
+  - Output length variability
+  - System overhead
+
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - cost
+    - prediction
+    - optimization
+  language: en
+
+temperature: 0.2
+max_tokens: 1000

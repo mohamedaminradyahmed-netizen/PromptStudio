@@ -62,13 +62,51 @@ services:
     container_name: promptstudio-frontend
     environment:
       - VITE_API_URL=http://localhost:3001
+      - VITE_PYTHON_API_URL=http://localhost:8000
     ports:
       - "3000:3000"
     depends_on:
       - backend
+      - python-backend
     volumes:
       - ./frontend/src:/app/src
     command: npm run dev
+
+  python-backend:
+    build:
+      context: ./backend/python
+      dockerfile: Dockerfile
+    container_name: promptstudio-python-backend
+    environment:
+      - DEBUG=true
+      - ENVIRONMENT=development
+      - HOST=0.0.0.0
+      - PORT=8000
+      - NODEJS_BACKEND_URL=http://backend:3001
+      - NODEJS_WS_URL=ws://backend:3001
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=postgresql+asyncpg://postgres:postgres@postgres:5432/promptstudio
+      - JWT_SECRET_KEY=your-secret-key-change-in-production
+      - COMMANDS_DIRECTORY=/app/commands
+      - LOG_LEVEL=INFO
+      # Set these in .env file
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    ports:
+      - "8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./backend/python/app:/app/app
+      - ./backend/python/commands:/app/commands
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
 volumes:
   postgres_data:

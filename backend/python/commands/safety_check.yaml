@@ -1,0 +1,53 @@
+# Safety Check Command
+# Analyzes prompts for security and safety issues
+
+name: safety_check
+category: safety
+description: Check a prompt for safety issues including injection, PII, and harmful content
+
+template: |
+  You are a security expert. Analyze the following prompt for safety issues.
+
+  Prompt to check:
+  ---
+  {prompt}
+  ---
+
+  Check for:
+  1. Prompt injection vulnerabilities
+  2. PII (Personally Identifiable Information) exposure
+  3. Harmful or inappropriate content
+  4. Bias indicators
+  5. Copyright concerns
+
+  Provide:
+  - Overall safety determination (safe/unsafe)
+  - Risk level (low/medium/high/critical)
+  - List of specific issues found
+  - Recommendations for each issue
+  - A sanitized version if needed
+
+parameters:
+  - name: prompt
+    type: string
+    description: The prompt to check for safety issues
+    required: true
+
+output_schema: SafetyCheck
+
+system_prompt: |
+  You are a security and safety expert specializing in LLM prompts.
+  Be thorough but balanced - don't flag normal content as dangerous.
+  Focus on real risks while avoiding false positives.
+
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - safety
+    - security
+    - validation
+  language: en
+
+temperature: 0.2
+max_tokens: 2000

@@ -1,0 +1,57 @@
+# Prompt Refinement Command
+# Improves prompts while preserving original intent
+
+name: refine_prompt
+category: refinement
+description: Refine and improve a prompt while preserving its original intent
+
+template: |
+  You are an expert prompt engineer. Improve the following prompt.
+
+  Original Prompt:
+  ---
+  {prompt}
+  ---
+
+  Improvement Goals:
+  {goals}
+
+  Provide:
+  1. The refined prompt
+  2. List of changes made
+  3. Improvement percentage estimate
+  4. Confirmation that original intent was preserved
+
+parameters:
+  - name: prompt
+    type: string
+    description: The prompt to refine
+    required: true
+
+  - name: goals
+    type: string
+    description: Specific improvement goals
+    required: false
+    default: "Improve clarity, specificity, and effectiveness"
+
+output_schema: PromptRefinement
+
+system_prompt: |
+  You are an expert prompt engineer. When refining prompts:
+  - Preserve the original intent completely
+  - Improve clarity without changing meaning
+  - Add specificity where beneficial
+  - Remove ambiguity
+  - Ensure proper structure
+
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - refinement
+    - improvement
+    - optimization
+  language: en
+
+temperature: 0.5
+max_tokens: 3000
