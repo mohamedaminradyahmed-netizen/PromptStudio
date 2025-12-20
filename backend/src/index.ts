@@ -13,6 +13,7 @@ import promptRoutes from './api/routes/prompts.js';
 import ragRoutes from './api/routes/rag.js';
 import chainRoutes from './api/routes/chains.js';
 import reasoningRoutes from './api/routes/reasoning.js';
+import refinementRoutes from './api/routes/refinement.js';
 import { errorHandler } from './api/middleware/errorHandler.js';
 import { authMiddleware } from './api/middleware/auth.js';
 
@@ -53,6 +54,7 @@ app.use('/api/prompts', promptRoutes);
 app.use('/api/rag', ragRoutes);
 app.use('/api/chains', chainRoutes);
 app.use('/api/reasoning', reasoningRoutes);
+app.use('/api/refinement', refinementRoutes);
 
 // Error handler
 app.use(errorHandler);
