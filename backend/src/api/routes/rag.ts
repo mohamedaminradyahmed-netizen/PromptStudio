@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { RAGService } from '../../services/RAGService';
+import { adaptiveRAGService } from '../../services/AdaptiveRAGService';
 
 const router = Router();
 
@@ -93,6 +94,177 @@ router.post('/chunk', async (req: Request, res: Response) => {
     res.json({ chunks, count: chunks.length });
   } catch (error) {
     res.status(500).json({ error: 'Failed to chunk text' });
+  }
+});
+
+// ==================== Adaptive RAG Endpoints ====================
+
+/**
+ * Retrieve adaptive context with dynamic context packing
+ * استرجاع سياق تكيفي مع حزم سياق ديناميكية
+ */
+router.post('/adaptive/retrieve', async (req: Request, res: Response) => {
+  try {
+    const {
+      knowledgeBaseId,
+      query,
+      maxChunks = 5,
+      minRelevance = 0.7,
+      minTrust = 0.5,
+      enableSummarization = true,
+      maxContextLength = 4000,
+      includeSourceTrace = true,
+    } = req.body;
+
+    if (!knowledgeBaseId || !query) {
+      return res.status(400).json({
+        error: 'knowledgeBaseId and query are required',
+      });
+    }
+
+    const result = await adaptiveRAGService.retrieveAdaptiveContext(
+      knowledgeBaseId,
+      query,
+      {
+        maxChunks,
+        minRelevance,
+        minTrust,
+        enableSummarization,
+        maxContextLength,
+        includeSourceTrace,
+      }
+    );
+
+    res.json(result);
+  } catch (error) {
+    console.error('Adaptive RAG retrieval error:', error);
+    res.status(500).json({
+      error: 'Failed to retrieve adaptive context',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * Build context mask for trusted sources
+ * بناء ماسك سياق للمصادر الموثوقة
+ */
+router.post('/adaptive/context-mask', async (req: Request, res: Response) => {
+  try {
+    const {
+      knowledgeBaseId,
+      trustThreshold = 0.5,
+      verifiedOnly = false,
+      allowedDomains = [],
+      blockedDomains = [],
+    } = req.body;
+
+    if (!knowledgeBaseId) {
+      return res.status(400).json({ error: 'knowledgeBaseId is required' });
+    }
+
+    const contextMask = await adaptiveRAGService.buildContextMask(
+      knowledgeBaseId,
+      {
+        trustThreshold,
+        verifiedOnly,
+        allowedDomains,
+        blockedDomains,
+      }
+    );
+
+    res.json(contextMask);
+  } catch (error) {
+    console.error('Context mask error:', error);
+    res.status(500).json({ error: 'Failed to build context mask' });
+  }
+});
+
+/**
+ * Get RAG session history
+ * الحصول على سجل جلسة RAG
+ */
+router.get('/adaptive/sessions/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    const session = await adaptiveRAGService.getSessionHistory(sessionId);
+
+    if (!session) {
+      return res.status(404).json({ error: 'Session not found' });
+    }
+
+    res.json(session);
+  } catch (error) {
+    console.error('Session history error:', error);
+    res.status(500).json({ error: 'Failed to retrieve session history' });
+  }
+});
+
+/**
+ * Register a trusted source
+ * تسجيل مصدر موثوق
+ */
+router.post('/adaptive/trusted-sources', async (req: Request, res: Response) => {
+  try {
+    const {
+      name,
+      domain,
+      url,
+      sourceType = 'document',
+      baseTrustScore = 0.8,
+      autoVerify = false,
+    } = req.body;
+
+    if (!name) {
+      return res.status(400).json({ error: 'name is required' });
+    }
+
+    const trustedSource = await adaptiveRAGService.registerTrustedSource({
+      name,
+      domain,
+      url,
+      sourceType,
+      baseTrustScore,
+      autoVerify,
+    });
+
+    res.json(trustedSource);
+  } catch (error) {
+    console.error('Register trusted source error:', error);
+    res.status(500).json({
+      error: 'Failed to register trusted source',
+      details: error instanceof Error ? error.message : 'Unknown error',
+    });
+  }
+});
+
+/**
+ * Summarize chunks with confidence indicators
+ * تلخيص المقتطفات مع مؤشرات الثقة
+ */
+router.post('/adaptive/summarize', async (req: Request, res: Response) => {
+  try {
+    const { chunks, query } = req.body;
+
+    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
+      return res.status(400).json({ error: 'chunks array is required' });
+    }
+
+    if (!query) {
+      return res.status(400).json({ error: 'query is required' });
+    }
+
+    const enrichedChunks = await adaptiveRAGService.summarizeChunks(chunks, query);
+
+    res.json({
+      enrichedChunks,
+      count: enrichedChunks.length,
+      avgConfidence: enrichedChunks.reduce((sum, c) => sum + c.confidenceScore, 0) / enrichedChunks.length,
+    });
+  } catch (error) {
+    console.error('Summarize chunks error:', error);
+    res.status(500).json({ error: 'Failed to summarize chunks' });
   }
 });
 
