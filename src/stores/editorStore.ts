@@ -1,6 +1,13 @@
 import { create } from 'zustand';
 import type { AnalysisResult, TokenVisualization, ToolDefinition, SmartVariable } from '../types';
 
+interface MetaPromptConfig {
+  persona?: string;
+  domain?: string;
+  timeConstraint?: 'urgent' | 'standard' | 'comprehensive';
+  metaInstructions?: Record<string, any>;
+}
+
 interface EditorState {
   content: string;
   title: string;
@@ -8,6 +15,11 @@ interface EditorState {
   tags: string[];
   category: string;
   modelId: string;
+
+  // Meta-prompting configuration
+  metaPromptConfig: MetaPromptConfig;
+  sessionMetaPrompt: string | null;
+  metaPromptEnabled: boolean;
 
   cursorPosition: number;
   selectionStart: number | null;
@@ -37,6 +49,12 @@ interface EditorState {
   setTags: (tags: string[]) => void;
   setCategory: (category: string) => void;
   setModelId: (modelId: string) => void;
+
+  // Meta-prompting actions
+  setMetaPromptConfig: (config: Partial<MetaPromptConfig>) => void;
+  setSessionMetaPrompt: (metaPrompt: string | null) => void;
+  setMetaPromptEnabled: (enabled: boolean) => void;
+  generateSessionMetaPrompt: (sessionId: string) => Promise<void>;
 
   setCursorPosition: (position: number) => void;
   setSelection: (start: number | null, end: number | null) => void;
@@ -87,6 +105,11 @@ const initialState = {
   tags: [],
   category: 'general',
   modelId: 'gpt-4',
+  metaPromptConfig: {
+    timeConstraint: 'standard' as const,
+  },
+  sessionMetaPrompt: null,
+  metaPromptEnabled: false,
   cursorPosition: 0,
   selectionStart: null,
   selectionEnd: null,
@@ -125,6 +148,31 @@ export const useEditorStore = create<EditorState>((set, get) => ({
   setTags: (tags) => set({ tags, isDirty: true }),
   setCategory: (category) => set({ category, isDirty: true }),
   setModelId: (modelId) => set({ modelId, isDirty: true }),
+
+  // Meta-prompting actions
+  setMetaPromptConfig: (config) => set((state) => ({
+    metaPromptConfig: { ...state.metaPromptConfig, ...config },
+    isDirty: true,
+  })),
+  setSessionMetaPrompt: (metaPrompt) => set({ sessionMetaPrompt: metaPrompt }),
+  setMetaPromptEnabled: (enabled) => set({ metaPromptEnabled: enabled }),
+  generateSessionMetaPrompt: async (sessionId: string) => {
+    const { metaPromptConfig } = get();
+    try {
+      const response = await fetch('/api/prompts/generate-session-meta', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId,
+          ...metaPromptConfig,
+        }),
+      });
+      const data = await response.json();
+      set({ sessionMetaPrompt: data.metaPrompt });
+    } catch (error) {
+      console.error('Failed to generate session meta-prompt:', error);
+    }
+  },
 
   setCursorPosition: (position) => set({ cursorPosition: position }),
   setSelection: (start, end) => set({ selectionStart: start, selectionEnd: end }),

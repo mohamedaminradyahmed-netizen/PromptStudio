@@ -1,5 +1,15 @@
 import prisma from '../lib/prisma';
 
+// In-memory session cache for meta-prompts
+interface SessionMetaPromptCache {
+  metaPrompt: string;
+  config: MetaPromptConfig;
+  createdAt: number;
+}
+
+const sessionMetaPromptCache = new Map<string, SessionMetaPromptCache>();
+const CACHE_TTL = 3600000; // 1 hour in milliseconds
+
 export interface HierarchicalPrompt {
   systemPrompt?: string;
   processPrompt?: string;
@@ -10,6 +20,7 @@ export interface HierarchicalPrompt {
 export interface MetaPromptConfig {
   persona?: string;
   domain?: string;
+  timeConstraint?: 'urgent' | 'standard' | 'comprehensive' | string;
   metaInstructions?: Record<string, any>;
 }
 
@@ -51,21 +62,36 @@ export class PromptService {
   }
 
   /**
-   * Generate meta-prompt based on persona and domain
+   * Generate meta-prompt based on persona, domain, and time constraints
    */
   static generateMetaPrompt(config: MetaPromptConfig): string {
     const parts: string[] = [];
 
+    // Persona-based instructions
     if (config.persona) {
       parts.push(`You are acting as a ${config.persona}.`);
     }
 
+    // Domain-specific expertise
     if (config.domain) {
       parts.push(`You are an expert in the ${config.domain} domain.`);
     }
 
+    // Time constraint handling
+    if (config.timeConstraint) {
+      const timeInstructions: Record<string, string> = {
+        urgent: 'Provide a concise, direct response focusing on immediate action items. Prioritize speed and clarity over comprehensive details.',
+        standard: 'Provide a balanced response with clear explanations and practical guidance.',
+        comprehensive: 'Provide a thorough, detailed response with extensive context, examples, and considerations. Take time to explore edge cases and alternative approaches.',
+      };
+
+      const instruction = timeInstructions[config.timeConstraint] || timeInstructions.standard;
+      parts.push(instruction);
+    }
+
+    // Additional meta-instructions
     if (config.metaInstructions) {
-      const { tone, style, expertise, constraints } = config.metaInstructions as any;
+      const { tone, style, expertise, constraints, language, format } = config.metaInstructions as any;
 
       if (tone) {
         parts.push(`Use a ${tone} tone.`);
@@ -79,12 +105,70 @@ export class PromptService {
         parts.push(`Apply ${expertise} level expertise.`);
       }
 
+      if (language) {
+        parts.push(`Respond in ${language} language.`);
+      }
+
+      if (format) {
+        parts.push(`Format output as ${format}.`);
+      }
+
       if (constraints) {
         parts.push(`Constraints: ${constraints}`);
       }
     }
 
     return parts.join(' ');
+  }
+
+  /**
+   * Generate and cache session-fixed meta-prompt
+   * Ensures consistency across a user session by caching the generated meta-prompt
+   */
+  static generateSessionMetaPrompt(sessionId: string, config: MetaPromptConfig): string {
+    // Check if cached meta-prompt exists and is still valid
+    const cached = sessionMetaPromptCache.get(sessionId);
+    if (cached && Date.now() - cached.createdAt < CACHE_TTL) {
+      // Verify config hasn't changed
+      if (
+        cached.config.persona === config.persona &&
+        cached.config.domain === config.domain &&
+        cached.config.timeConstraint === config.timeConstraint
+      ) {
+        return cached.metaPrompt;
+      }
+    }
+
+    // Generate new meta-prompt
+    const metaPrompt = this.generateMetaPrompt(config);
+
+    // Cache for session
+    sessionMetaPromptCache.set(sessionId, {
+      metaPrompt,
+      config,
+      createdAt: Date.now(),
+    });
+
+    return metaPrompt;
+  }
+
+  /**
+   * Clear session meta-prompt cache
+   */
+  static clearSessionMetaPrompt(sessionId: string): void {
+    sessionMetaPromptCache.delete(sessionId);
+  }
+
+  /**
+   * Clear expired cache entries
+   */
+  static cleanupExpiredCache(): void {
+    const now = Date.now();
+    for (const [sessionId, cache] of sessionMetaPromptCache.entries()) {
+      if (now - cache.createdAt >= CACHE_TTL) {
+        sessionMetaPromptCache.delete(sessionId);
+      }
+    }
   }
 
   /**

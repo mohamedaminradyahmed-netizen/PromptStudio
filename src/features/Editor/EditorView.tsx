@@ -19,6 +19,7 @@ import { ToolDefinitionPanel } from './ToolDefinitionPanel';
 import { SmartVariables } from './SmartVariables';
 import { VoiceInput } from './VoiceInput';
 import { AIGenerator } from './AIGenerator';
+import { MetaPromptingPanel } from '../../components/MetaPromptingPanel';
 import { useEditorStore } from '../../stores/editorStore';
 import { useAppStore } from '../../stores/appStore';
 import { createPrompt, updatePrompt } from '../../services/promptService';
@@ -44,7 +45,7 @@ export function EditorView() {
   const [isSaving, setIsSaving] = useState(false);
   const [showTagInput, setShowTagInput] = useState(false);
   const [newTag, setNewTag] = useState('');
-  const [activePanel, setActivePanel] = useState<'analysis' | 'tools' | 'variables'>('analysis');
+  const [activePanel, setActivePanel] = useState<'analysis' | 'tools' | 'variables' | 'meta'>('analysis');
 
   const handleSave = useCallback(async () => {
     if (!sessionId || !content.trim()) return;
@@ -259,7 +260,7 @@ export function EditorView() {
           'px-4 py-3 border-b flex gap-2',
           theme === 'dark' ? 'border-gray-800' : 'border-gray-200'
         )}>
-          {(['analysis', 'tools', 'variables'] as const).map((panel) => (
+          {(['analysis', 'tools', 'variables', 'meta'] as const).map((panel) => (
             <button
               key={panel}
               onClick={() => setActivePanel(panel)}
@@ -300,6 +301,10 @@ export function EditorView() {
               <AIGenerator />
               <VoiceInput />
             </>
+          )}
+
+          {activePanel === 'meta' && (
+            <MetaPromptingPanel />
           )}
         </div>
       </aside>

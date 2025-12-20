@@ -29,17 +29,53 @@ router.post('/build-hierarchical', async (req: Request, res: Response) => {
 // Generate meta-prompt
 router.post('/generate-meta', async (req: Request, res: Response) => {
   try {
-    const { persona, domain, metaInstructions } = req.body;
+    const { persona, domain, timeConstraint, metaInstructions } = req.body;
 
     const metaPrompt = PromptService.generateMetaPrompt({
       persona,
       domain,
+      timeConstraint,
       metaInstructions,
     });
 
     res.json({ metaPrompt });
   } catch (error) {
     res.status(500).json({ error: 'Failed to generate meta-prompt' });
+  }
+});
+
+// Generate session-fixed meta-prompt
+router.post('/generate-session-meta', async (req: Request, res: Response) => {
+  try {
+    const { sessionId, persona, domain, timeConstraint, metaInstructions } = req.body;
+
+    if (!sessionId) {
+      return res.status(400).json({ error: 'Session ID is required' });
+    }
+
+    const metaPrompt = PromptService.generateSessionMetaPrompt(sessionId, {
+      persona,
+      domain,
+      timeConstraint,
+      metaInstructions,
+    });
+
+    res.json({ metaPrompt, cached: true });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate session meta-prompt' });
+  }
+});
+
+// Clear session meta-prompt cache
+router.delete('/session-meta/:sessionId', async (req: Request, res: Response) => {
+  try {
+    const { sessionId } = req.params;
+
+    PromptService.clearSessionMetaPrompt(sessionId);
+
+    res.json({ success: true, message: 'Session meta-prompt cleared' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to clear session meta-prompt' });
   }
 });
 

@@ -210,6 +210,7 @@ model MarketplacePrompt {
   // Meta-Prompting
   persona       String?
   domain        String?
+  timeConstraint String? // e.g., "urgent", "standard", "comprehensive"
   metaInstructions Json? @default("{}")
 
   // Advanced Features
