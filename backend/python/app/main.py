@@ -16,13 +16,15 @@ from loguru import logger
 
 from .core.config import settings
 from .core.logging import setup_logging
-from .api.routes import llm_router, commands_router, health_router
+from .core.database import database
+from .api.routes import llm_router, commands_router, health_router, rag_router
 from .api.routes.agents import router as agents_router
 from .websocket.bridge import bridge
 from .websocket.handlers import WebSocketHandlers
 from .services.llm_service import LLMService
 from .services.instructor_service import InstructorService
 from .services.command_service import CommandService
+from .services.rag_service import RAGService
 
 
 # Setup logging
@@ -35,15 +37,24 @@ async def lifespan(app: FastAPI):
     Application lifespan manager
 
     Handles startup and shutdown events:
+    - Initialize database with pgvector
     - Connect to Node.js backend on startup
     - Disconnect on shutdown
     """
     logger.info("Starting PromptStudio Python Backend...")
 
+    # Initialize database with pgvector support
+    try:
+        await database.init()
+        logger.info("Database initialized with pgvector support")
+    except Exception as e:
+        logger.error(f"Database initialization failed: {e}")
+
     # Initialize services
     llm_service = LLMService()
     instructor_service = InstructorService()
     command_service = CommandService()
+    rag_service = RAGService()
 
     # Setup WebSocket handlers
     handlers = WebSocketHandlers(
@@ -57,6 +68,7 @@ async def lifespan(app: FastAPI):
     app.state.llm_service = llm_service
     app.state.instructor_service = instructor_service
     app.state.command_service = command_service
+    app.state.rag_service = rag_service
     app.state.handlers = handlers
 
     # Store services dict for agents
@@ -79,6 +91,7 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down Python backend...")
     await bridge.disconnect_from_nodejs()
+    await database.close()
 
 
 # Create FastAPI application
@@ -99,6 +112,9 @@ app = FastAPI(
     - **Prompt Analysis**: Analyze prompts for quality and safety
     - **Translation**: Multi-language prompt translation
     - **Cost Prediction**: Pre-send cost estimation
+    - **RAG System**: Document ingestion and semantic retrieval with pgvector
+    - **Vector Search**: Hybrid search combining similarity and trust scores
+    - **Knowledge Bases**: Organize documents in searchable collections
 
     ## Agent Framework
 
@@ -126,6 +142,7 @@ app.include_router(health_router)
 app.include_router(llm_router, prefix="/api")
 app.include_router(commands_router, prefix="/api")
 app.include_router(agents_router, prefix="/api")
+app.include_router(rag_router, prefix="/api")
 
 
 # WebSocket endpoint for direct client connections
