@@ -1,19 +1,86 @@
 import type { AnalysisResult, PromptComponent, AnalysisSuggestion, AnalysisWarning, TokenEstimate, TokenVisualization, Token } from '../types';
 
+// =============================================================================
+// SAFETY POLICY TYPES
+// =============================================================================
+
+export interface SafetyPolicy {
+  id: string;
+  name: string;
+  enabled: boolean;
+  blockOnViolation: boolean;
+  autoFix: boolean;
+}
+
+export interface SafetyCheckResult {
+  passed: boolean;
+  blocked: boolean;
+  score: number;
+  issues: SafetyIssue[];
+  sanitizedContent?: string;
+  recommendations: string[];
+  driftAnalysis?: DriftAnalysis;
+}
+
+export interface SafetyIssue {
+  id: string;
+  type: 'toxicity' | 'pii' | 'drift' | 'injection' | 'bias' | 'security';
+  severity: 'critical' | 'high' | 'medium' | 'low';
+  title: string;
+  description: string;
+  location?: { start: number; end: number };
+  matchedContent?: string;
+  suggestion?: string;
+  autoFixable: boolean;
+  fixedContent?: string;
+}
+
+export interface DriftAnalysis {
+  driftScore: number;
+  driftType: 'semantic' | 'topic' | 'intent' | 'none';
+  originalIntent?: string;
+  detectedIntent?: string;
+  driftingKeywords: string[];
+  recommendation?: string;
+}
+
+// =============================================================================
+// PATTERN DEFINITIONS
+// =============================================================================
+
 const SENSITIVE_PATTERNS = [
-  { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, type: 'email' },
-  { pattern: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, type: 'phone' },
-  { pattern: /\b\d{3}[-]?\d{2}[-]?\d{4}\b/g, type: 'ssn' },
-  { pattern: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b/g, type: 'credit_card' },
-  { pattern: /(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)[=:]\s*['"]?[\w-]+['"]?/gi, type: 'api_key' },
-  { pattern: /(?:password|passwd|pwd)[=:]\s*['"]?[^\s'"]+['"]?/gi, type: 'password' },
+  { pattern: /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/g, type: 'email', severity: 'high' as const },
+  { pattern: /\b\d{3}[-.]?\d{3}[-.]?\d{4}\b/g, type: 'phone', severity: 'high' as const },
+  { pattern: /\b\d{3}[-]?\d{2}[-]?\d{4}\b/g, type: 'ssn', severity: 'critical' as const },
+  { pattern: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13})\b/g, type: 'credit_card', severity: 'critical' as const },
+  { pattern: /(?:api[_-]?key|apikey|secret[_-]?key|access[_-]?token|auth[_-]?token)[=:]\s*['"]?[\w-]+['"]?/gi, type: 'api_key', severity: 'critical' as const },
+  { pattern: /(?:password|passwd|pwd)[=:]\s*['"]?[^\s'"]+['"]?/gi, type: 'password', severity: 'critical' as const },
+  { pattern: /(?:AKIA|ABIA|ACCA|ASIA)[A-Z0-9]{16}/g, type: 'aws_key', severity: 'critical' as const },
+  { pattern: /-----BEGIN\s+(?:RSA\s+)?PRIVATE\s+KEY-----/g, type: 'private_key', severity: 'critical' as const },
 ];
 
 const SECURITY_PATTERNS = [
-  { pattern: /(?:rm\s+-rf|del\s+\/|format\s+c:)/gi, message: 'Potentially dangerous system command detected' },
-  { pattern: /(?:eval|exec|system)\s*\(/gi, message: 'Code execution function detected' },
-  { pattern: /(?:ignore previous|disregard|forget all)/gi, message: 'Potential prompt injection pattern' },
-  { pattern: /(?:you are now|act as if|pretend you)/gi, message: 'Role manipulation attempt detected' },
+  { pattern: /(?:rm\s+-rf|del\s+\/|format\s+c:)/gi, message: 'Potentially dangerous system command detected', severity: 'critical' as const },
+  { pattern: /(?:eval|exec|system)\s*\(/gi, message: 'Code execution function detected', severity: 'high' as const },
+  { pattern: /(?:ignore previous|disregard|forget all)/gi, message: 'Potential prompt injection pattern', severity: 'critical' as const },
+  { pattern: /(?:you are now|act as if|pretend you)/gi, message: 'Role manipulation attempt detected', severity: 'high' as const },
+  { pattern: /(?:DROP\s+TABLE|DELETE\s+FROM|TRUNCATE)/gi, message: 'SQL injection pattern detected', severity: 'critical' as const },
+  { pattern: /<script[\s>]|javascript:/gi, message: 'XSS attempt detected', severity: 'critical' as const },
+  { pattern: /jailbreak|DAN\s+mode|bypass\s+restrictions/gi, message: 'Jailbreak attempt detected', severity: 'critical' as const },
+];
+
+const TOXICITY_PATTERNS = [
+  { pattern: /\b(hate|attack|kill|destroy|eliminate)\s+(all|every)?\s*(people|humans|users)/gi, category: 'hate_speech', severity: 'critical' as const },
+  { pattern: /\b(racist|sexist|homophobic|transphobic)\b/gi, category: 'discrimination', severity: 'high' as const },
+  { pattern: /\b(threaten|harm|hurt|abuse|assault)\s+\w+/gi, category: 'threats', severity: 'high' as const },
+  { pattern: /\b(stupid|idiot|dumb|moron)\b/gi, category: 'insults', severity: 'medium' as const },
+  { pattern: /\b(harass|stalk|bully|intimidate)\b/gi, category: 'harassment', severity: 'high' as const },
+];
+
+const BIAS_PATTERNS = [
+  { pattern: /\b(always|never|all|none)\s+(men|women|people)\s+(are|will|should)/gi, category: 'generalization', severity: 'medium' as const },
+  { pattern: /\b(obviously|clearly|naturally|everyone\s+knows)\b/gi, category: 'assumption', severity: 'low' as const },
+  { pattern: /\b(normal|abnormal)\s+(people|person|behavior)/gi, category: 'normative', severity: 'medium' as const },
 ];
 
 const ROLE_PATTERNS = [
@@ -391,4 +458,377 @@ export function replaceVariables(content: string, values: Record<string, string>
   });
 
   return result;
+}
+
+// =============================================================================
+// SAFETY CHECK FUNCTIONS
+// =============================================================================
+
+let issueIdCounter = 0;
+function generateIssueId(): string {
+  return `issue_${Date.now()}_${++issueIdCounter}`;
+}
+
+/**
+ * Detect toxicity in content
+ */
+export function detectToxicity(content: string): SafetyIssue[] {
+  const issues: SafetyIssue[] = [];
+
+  for (const { pattern, category, severity } of TOXICITY_PATTERNS) {
+    pattern.lastIndex = 0;
+    const matches = content.matchAll(pattern);
+    for (const match of matches) {
+      issues.push({
+        id: generateIssueId(),
+        type: 'toxicity',
+        severity,
+        title: `محتوى سام: ${category}`,
+        description: `تم اكتشاف لغة سامة محتملة: "${match[0]}"`,
+        location: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+        matchedContent: match[0],
+        suggestion: 'قم بإزالة أو إعادة صياغة المحتوى السام باستخدام لغة محايدة',
+        autoFixable: true,
+        fixedContent: '[تم الحذف]',
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Detect PII (Personally Identifiable Information)
+ */
+export function detectPII(content: string): SafetyIssue[] {
+  const issues: SafetyIssue[] = [];
+  const redactionMap: Record<string, string> = {
+    email: '[بريد_محذوف]',
+    phone: '[هاتف_محذوف]',
+    ssn: '[رقم_ضمان_محذوف]',
+    credit_card: '[بطاقة_محذوفة]',
+    api_key: '[مفتاح_API_محذوف]',
+    password: '[كلمة_سر_محذوفة]',
+    aws_key: '[مفتاح_AWS_محذوف]',
+    private_key: '[مفتاح_خاص_محذوف]',
+  };
+
+  for (const { pattern, type, severity } of SENSITIVE_PATTERNS) {
+    pattern.lastIndex = 0;
+    const matches = content.matchAll(pattern);
+    for (const match of matches) {
+      issues.push({
+        id: generateIssueId(),
+        type: 'pii',
+        severity,
+        title: `معلومات شخصية: ${type.replace('_', ' ')}`,
+        description: `تم اكتشاف ${type.replace('_', ' ')} محتمل`,
+        location: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+        matchedContent: match[0].substring(0, 4) + '****',
+        suggestion: `قم بإزالة أو إخفاء ${type.replace('_', ' ')} قبل الإرسال`,
+        autoFixable: true,
+        fixedContent: redactionMap[type] || '[محذوف]',
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Detect prompt injection attempts
+ */
+export function detectInjection(content: string): SafetyIssue[] {
+  const issues: SafetyIssue[] = [];
+
+  for (const { pattern, message, severity } of SECURITY_PATTERNS) {
+    pattern.lastIndex = 0;
+    if (pattern.test(content)) {
+      pattern.lastIndex = 0;
+      const matches = content.matchAll(pattern);
+      for (const match of matches) {
+        issues.push({
+          id: generateIssueId(),
+          type: 'injection',
+          severity,
+          title: 'محاولة حقن',
+          description: message,
+          location: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+          matchedContent: match[0],
+          suggestion: 'قم بإزالة نمط الحقن للحفاظ على سلامة البرومبت',
+          autoFixable: false,
+        });
+      }
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Detect biased language
+ */
+export function detectBias(content: string): SafetyIssue[] {
+  const issues: SafetyIssue[] = [];
+
+  for (const { pattern, category, severity } of BIAS_PATTERNS) {
+    pattern.lastIndex = 0;
+    const matches = content.matchAll(pattern);
+    for (const match of matches) {
+      issues.push({
+        id: generateIssueId(),
+        type: 'bias',
+        severity,
+        title: `تحيز محتمل: ${category}`,
+        description: `لغة قد تشير إلى تحيز: "${match[0]}"`,
+        location: match.index !== undefined ? { start: match.index, end: match.index + match[0].length } : undefined,
+        matchedContent: match[0],
+        suggestion: 'استخدم لغة أكثر شمولية وحيادية',
+        autoFixable: false,
+      });
+    }
+  }
+
+  return issues;
+}
+
+/**
+ * Detect drift from expected context/topic
+ */
+export function detectDrift(content: string, baselineContext?: string): DriftAnalysis {
+  const result: DriftAnalysis = {
+    driftScore: 0,
+    driftType: 'none',
+    driftingKeywords: [],
+  };
+
+  if (!baselineContext) {
+    return result;
+  }
+
+  // Extract keywords from baseline (words > 3 chars)
+  const baselineWords = new Set(
+    baselineContext
+      .toLowerCase()
+      .split(/\W+/)
+      .filter(w => w.length > 3)
+  );
+
+  // Extract keywords from content
+  const contentWords = content
+    .toLowerCase()
+    .split(/\W+/)
+    .filter(w => w.length > 3);
+
+  // Find words in content not in baseline
+  const driftingWords = contentWords.filter(w => !baselineWords.has(w));
+
+  // Calculate drift score
+  const uniqueDriftingWords = [...new Set(driftingWords)];
+  const driftRatio = contentWords.length > 0 ? uniqueDriftingWords.length / contentWords.length : 0;
+
+  // Detect off-topic indicators
+  const offTopicPatterns = [
+    /(?:by the way|بالمناسبة|unrelated|غير متعلق|different topic|موضوع مختلف)/gi,
+    /(?:forget about|انسى|instead of|بدلاً من|rather than)/gi,
+    /(?:also|أيضاً|another thing|شيء آخر|let me ask)/gi,
+  ];
+
+  let intentDrift = false;
+  for (const pattern of offTopicPatterns) {
+    if (pattern.test(content)) {
+      intentDrift = true;
+      break;
+    }
+  }
+
+  result.driftScore = Math.min(driftRatio + (intentDrift ? 0.3 : 0), 1);
+  result.driftingKeywords = uniqueDriftingWords.slice(0, 10);
+
+  if (result.driftScore > 0.7) {
+    result.driftType = 'topic';
+    result.recommendation = 'المحتوى يبدو خارج الموضوع بشكل كبير عن السياق المتوقع';
+  } else if (intentDrift) {
+    result.driftType = 'intent';
+    result.recommendation = 'المحتوى يحتوي على لغة تشير إلى تغيير الموضوع';
+  } else if (result.driftScore > 0.4) {
+    result.driftType = 'semantic';
+    result.recommendation = 'المحتوى يحتوي على انحراف دلالي معتدل عن الأساس';
+  }
+
+  return result;
+}
+
+/**
+ * Sanitize content by applying fixes
+ */
+export function sanitizeContent(content: string, issues: SafetyIssue[]): string {
+  let sanitized = content;
+
+  // Sort by location descending to avoid offset issues
+  const fixableIssues = [...issues]
+    .filter(issue => issue.autoFixable && issue.location && issue.fixedContent)
+    .sort((a, b) => (b.location?.start ?? 0) - (a.location?.start ?? 0));
+
+  for (const issue of fixableIssues) {
+    if (issue.location && issue.fixedContent) {
+      sanitized =
+        sanitized.substring(0, issue.location.start) +
+        issue.fixedContent +
+        sanitized.substring(issue.location.end);
+    }
+  }
+
+  return sanitized;
+}
+
+/**
+ * Perform comprehensive safety check on content
+ */
+export function performSafetyCheck(
+  content: string,
+  options: {
+    checkToxicity?: boolean;
+    checkPII?: boolean;
+    checkDrift?: boolean;
+    checkInjection?: boolean;
+    checkBias?: boolean;
+    autoSanitize?: boolean;
+    baselineContext?: string;
+  } = {}
+): SafetyCheckResult {
+  const {
+    checkToxicity: doToxicity = true,
+    checkPII: doPII = true,
+    checkDrift: doDrift = false,
+    checkInjection: doInjection = true,
+    checkBias: doBias = true,
+    autoSanitize = false,
+    baselineContext,
+  } = options;
+
+  const issues: SafetyIssue[] = [];
+  const recommendations: string[] = [];
+
+  // Perform checks
+  if (doToxicity) {
+    issues.push(...detectToxicity(content));
+  }
+
+  if (doPII) {
+    issues.push(...detectPII(content));
+  }
+
+  if (doInjection) {
+    issues.push(...detectInjection(content));
+  }
+
+  if (doBias) {
+    issues.push(...detectBias(content));
+  }
+
+  let driftAnalysis: DriftAnalysis | undefined;
+  if (doDrift && baselineContext) {
+    driftAnalysis = detectDrift(content, baselineContext);
+    if (driftAnalysis.driftScore > 0.4) {
+      issues.push({
+        id: generateIssueId(),
+        type: 'drift',
+        severity: driftAnalysis.driftScore > 0.7 ? 'high' : 'medium',
+        title: `انحراف في السياق: ${driftAnalysis.driftType}`,
+        description: driftAnalysis.recommendation ?? 'المحتوى ينحرف عن السياق المتوقع',
+        suggestion: 'فكر في إعادة التركيز على الموضوع الأصلي',
+        autoFixable: false,
+        matchedContent: driftAnalysis.driftingKeywords.join(', '),
+      });
+    }
+  }
+
+  // Calculate score
+  let score = 100;
+  for (const issue of issues) {
+    switch (issue.severity) {
+      case 'critical': score -= 30; break;
+      case 'high': score -= 20; break;
+      case 'medium': score -= 10; break;
+      case 'low': score -= 5; break;
+    }
+  }
+  score = Math.max(0, score);
+
+  // Generate recommendations
+  const issueTypes = new Set(issues.map(i => i.type));
+  if (issueTypes.has('toxicity')) {
+    recommendations.push('قم بإزالة أو إعادة صياغة اللغة السامة قبل الإرسال');
+  }
+  if (issueTypes.has('pii')) {
+    recommendations.push('قم بإخفاء المعلومات الشخصية لحماية الخصوصية');
+  }
+  if (issueTypes.has('injection')) {
+    recommendations.push('قم بإزالة أنماط حقن البرومبت للحفاظ على الأمان');
+  }
+  if (issueTypes.has('bias')) {
+    recommendations.push('استخدم لغة أكثر شمولية');
+  }
+  if (issueTypes.has('drift')) {
+    recommendations.push('أعد التركيز على الموضوع الأصلي');
+  }
+
+  // Determine blocking
+  const hasCritical = issues.some(i => i.severity === 'critical');
+  const blocked = hasCritical;
+
+  // Sanitize if requested
+  let sanitizedContent: string | undefined;
+  if (autoSanitize && issues.some(i => i.autoFixable)) {
+    sanitizedContent = sanitizeContent(content, issues);
+  }
+
+  return {
+    passed: !blocked && score >= 50,
+    blocked,
+    score,
+    issues,
+    sanitizedContent,
+    recommendations,
+    driftAnalysis,
+  };
+}
+
+/**
+ * Pre-send validation with policy enforcement
+ */
+export function validateBeforeSend(
+  content: string,
+  policy?: SafetyPolicy
+): {
+  canSend: boolean;
+  result: SafetyCheckResult;
+  action: 'allow' | 'warn' | 'block' | 'sanitize';
+} {
+  const result = performSafetyCheck(content, {
+    checkToxicity: true,
+    checkPII: true,
+    checkInjection: true,
+    checkBias: true,
+    autoSanitize: policy?.autoFix ?? false,
+  });
+
+  let action: 'allow' | 'warn' | 'block' | 'sanitize' = 'allow';
+
+  if (result.blocked) {
+    action = 'block';
+  } else if (result.sanitizedContent && policy?.autoFix) {
+    action = 'sanitize';
+  } else if (result.issues.length > 0) {
+    action = 'warn';
+  }
+
+  const canSend = action !== 'block' || !(policy?.blockOnViolation ?? true);
+
+  return {
+    canSend,
+    result,
+    action,
+  };
 }
