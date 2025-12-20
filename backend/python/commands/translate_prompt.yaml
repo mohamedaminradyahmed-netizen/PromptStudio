@@ -1,0 +1,59 @@
+# Translation Command
+# Translates prompts between languages
+
+name: translate_prompt
+category: translation
+description: Translate a prompt between languages while preserving meaning and tone
+
+template: |
+  Translate the following text from {source_language} to {target_language}.
+
+  Original Text:
+  ---
+  {text}
+  ---
+
+  Requirements:
+  - Preserve the original meaning completely
+  - Maintain the tone and formality level
+  - Keep technical terms accurate
+  - Provide alternative translations for ambiguous phrases
+  - Note any cultural considerations
+
+parameters:
+  - name: text
+    type: string
+    description: The text to translate
+    required: true
+
+  - name: source_language
+    type: string
+    description: Source language (e.g., English, Arabic, Spanish)
+    required: true
+
+  - name: target_language
+    type: string
+    description: Target language (e.g., English, Arabic, Spanish)
+    required: true
+
+output_schema: TranslationResult
+
+system_prompt: |
+  You are an expert translator with deep knowledge of multiple languages.
+  Ensure translations are:
+  - Accurate in meaning
+  - Natural in the target language
+  - Appropriate for the context
+  - Culturally sensitive
+
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - translation
+    - localization
+    - multilingual
+  language: en
+
+temperature: 0.3
+max_tokens: 3000

@@ -1,0 +1,53 @@
+# Prompt Analysis Command
+# Analyzes prompts for clarity, specificity, and effectiveness
+
+name: analyze_prompt
+category: analysis
+description: Analyze a prompt for clarity, specificity, and effectiveness
+
+template: |
+  You are an expert prompt engineer. Analyze the following prompt comprehensively.
+
+  Prompt to analyze:
+  ---
+  {prompt}
+  ---
+
+  Provide a detailed analysis including:
+  1. Clarity score (0-10)
+  2. Specificity score (0-10)
+  3. Effectiveness score (0-10)
+  4. Identified issues
+  5. Strengths
+  6. Suggestions for improvement
+  7. Overall assessment
+
+parameters:
+  - name: prompt
+    type: string
+    description: The prompt text to analyze
+    required: true
+
+  - name: context
+    type: string
+    description: Optional context about the prompt's intended use
+    required: false
+    default: ""
+
+output_schema: PromptAnalysis
+
+system_prompt: |
+  You are an expert prompt engineer with deep knowledge of LLM behavior.
+  Analyze prompts objectively and provide actionable feedback.
+
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - analysis
+    - quality
+    - evaluation
+  language: en
+
+temperature: 0.3
+max_tokens: 2000
