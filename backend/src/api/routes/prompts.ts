@@ -101,7 +101,7 @@ router.post('/graph-of-thought', async (req: Request, res: Response) => {
   }
 });
 
-// Generate tool plan
+// Generate tool plan (legacy)
 router.post('/tool-plan', async (req: Request, res: Response) => {
   try {
     const { prompt, availableTools } = req.body;
@@ -111,6 +111,48 @@ router.post('/tool-plan', async (req: Request, res: Response) => {
     res.json({ plan });
   } catch (error) {
     res.status(500).json({ error: 'Failed to generate tool plan' });
+  }
+});
+
+// Advanced tool planning with reasoning
+router.post('/plan-tools', async (req: Request, res: Response) => {
+  try {
+    const { prompt, availableTools, maxTools, requireApproval } = req.body;
+
+    const result = await LLMServiceAdapter.planToolUsage({
+      prompt,
+      availableTools: availableTools || [],
+      maxTools: maxTools || 5,
+      requireApproval: requireApproval !== false,
+    });
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to plan tool usage' });
+  }
+});
+
+// Execute approved tool plan
+router.post('/execute-plan', async (req: Request, res: Response) => {
+  try {
+    const { plan, approved } = req.body;
+
+    if (!approved) {
+      res.json({
+        results: [],
+        summary: 'Execution cancelled - plan not approved',
+      });
+      return;
+    }
+
+    // In a real implementation, executors would be provided based on registered tools
+    const mockExecutors: Record<string, (params: Record<string, any>) => Promise<any>> = {};
+
+    const result = await LLMServiceAdapter.executePlan(plan, approved, mockExecutors);
+
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to execute tool plan' });
   }
 });
 

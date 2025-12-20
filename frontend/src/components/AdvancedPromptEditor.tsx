@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { AlertCircle, Brain, Shield, DollarSign, Zap, GitBranch } from 'lucide-react';
+import { AlertCircle, Brain, Shield, DollarSign, Zap, GitBranch, Wrench } from 'lucide-react';
+import { ToolPlanViewer } from './ToolPlanViewer';
 
 interface HierarchicalPrompt {
   systemPrompt: string;
@@ -26,6 +27,32 @@ interface PreSendAnalysis {
   recommendations: string[];
 }
 
+interface ToolPlan {
+  toolName: string;
+  reason: string;
+  parameters: Record<string, any>;
+  order: number;
+  confidence: number;
+  estimatedDuration?: string;
+  dependencies?: string[];
+}
+
+interface ToolPlanningResult {
+  plan: ToolPlan[];
+  reasoning: string;
+  alternativePlans?: ToolPlan[][];
+  warnings?: string[];
+  totalEstimatedDuration?: string;
+  planEnabled: boolean;
+}
+
+interface ToolDefinition {
+  name: string;
+  description: string;
+  parameters?: Record<string, { type: string; description: string; required?: boolean }>;
+  category?: string;
+}
+
 export function AdvancedPromptEditor() {
   const [hierarchical, setHierarchical] = useState<HierarchicalPrompt>({
     systemPrompt: '',
@@ -44,6 +71,65 @@ export function AdvancedPromptEditor() {
 
   const [analysis, setAnalysis] = useState<PreSendAnalysis | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [toolPlanResult, setToolPlanResult] = useState<ToolPlanningResult | null>(null);
+  const [isPlanning, setIsPlanning] = useState(false);
+
+  // Sample available tools - in production, these would come from an API
+  const availableTools: ToolDefinition[] = [
+    {
+      name: 'web_search',
+      description: 'Search the web for information and retrieve results',
+      parameters: {
+        query: { type: 'string', description: 'Search query', required: true },
+        limit: { type: 'number', description: 'Max results' },
+      },
+      category: 'search',
+    },
+    {
+      name: 'code_analyzer',
+      description: 'Analyze and review code for issues and improvements',
+      parameters: {
+        code: { type: 'string', description: 'Code to analyze', required: true },
+        language: { type: 'string', description: 'Programming language' },
+      },
+      category: 'development',
+    },
+    {
+      name: 'data_fetcher',
+      description: 'Fetch and retrieve data from APIs and databases',
+      parameters: {
+        url: { type: 'string', description: 'API URL', required: true },
+        method: { type: 'string', description: 'HTTP method' },
+      },
+      category: 'api',
+    },
+    {
+      name: 'text_translator',
+      description: 'Translate text between different languages',
+      parameters: {
+        text: { type: 'string', description: 'Text to translate', required: true },
+        targetLang: { type: 'string', description: 'Target language', required: true },
+      },
+      category: 'translation',
+    },
+    {
+      name: 'file_processor',
+      description: 'Process and transform files including documents and images',
+      parameters: {
+        filePath: { type: 'string', description: 'Path to file', required: true },
+        operation: { type: 'string', description: 'Operation to perform' },
+      },
+      category: 'file',
+    },
+    {
+      name: 'calculator',
+      description: 'Calculate mathematical expressions and formulas',
+      parameters: {
+        expression: { type: 'string', description: 'Math expression', required: true },
+      },
+      category: 'math',
+    },
+  ];
 
   const handleAnalyze = async () => {
     // Simulate analysis
@@ -60,6 +146,77 @@ export function AdvancedPromptEditor() {
         'Output format could be more structured',
       ],
     });
+
+    // If tool planning is enabled, generate a plan
+    if (settings.toolPlanning) {
+      await handleGenerateToolPlan();
+    }
+  };
+
+  const handleGenerateToolPlan = async () => {
+    setIsPlanning(true);
+    const fullPrompt = buildFullPrompt();
+
+    try {
+      const response = await fetch('/api/prompts/plan-tools', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt: fullPrompt,
+          availableTools,
+          maxTools: 5,
+          requireApproval: true,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        setToolPlanResult(result);
+      }
+    } catch (error) {
+      console.error('Failed to generate tool plan:', error);
+    } finally {
+      setIsPlanning(false);
+    }
+  };
+
+  const handleApprovePlan = async (plan: ToolPlan[]) => {
+    try {
+      const response = await fetch('/api/prompts/execute-plan', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          plan,
+          approved: true,
+        }),
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        console.log('Execution result:', result);
+        // Handle execution result
+      }
+    } catch (error) {
+      console.error('Failed to execute plan:', error);
+    }
+  };
+
+  const handleRejectPlan = () => {
+    setToolPlanResult(null);
+  };
+
+  const handleSelectAlternative = (plan: ToolPlan[]) => {
+    if (toolPlanResult) {
+      setToolPlanResult({
+        ...toolPlanResult,
+        plan,
+      });
+    }
+  };
+
+  const handleDisableToolPlanning = () => {
+    setSettings({ ...settings, toolPlanning: false });
+    setToolPlanResult(null);
   };
 
   const buildFullPrompt = () => {
@@ -340,6 +497,36 @@ export function AdvancedPromptEditor() {
           </div>
         )}
       </div>
+
+      {/* Tool Plan Section */}
+      {settings.toolPlanning && (
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-lg font-semibold text-gray-900 dark:text-white flex items-center gap-2">
+              <Wrench className="w-5 h-5" />
+              Tool Planning
+            </h3>
+            {!toolPlanResult && !isPlanning && (
+              <button
+                onClick={handleGenerateToolPlan}
+                className="px-3 py-1.5 bg-purple-500 hover:bg-purple-600 text-white text-sm rounded-lg flex items-center gap-2"
+              >
+                <Wrench className="w-4 h-4" />
+                Generate Tool Plan
+              </button>
+            )}
+          </div>
+
+          <ToolPlanViewer
+            planResult={toolPlanResult}
+            isLoading={isPlanning}
+            onApprove={handleApprovePlan}
+            onReject={handleRejectPlan}
+            onSelectAlternative={handleSelectAlternative}
+            onDisable={handleDisableToolPlanning}
+          />
+        </div>
+      )}
 
       {/* Preview */}
       <div className="space-y-4">
