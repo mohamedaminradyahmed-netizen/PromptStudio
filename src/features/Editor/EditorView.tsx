@@ -19,6 +19,7 @@ import { ToolDefinitionPanel } from './ToolDefinitionPanel';
 import { SmartVariables } from './SmartVariables';
 import { VoiceInput } from './VoiceInput';
 import { AIGenerator } from './AIGenerator';
+import { PreSendAnalysis } from './PreSendAnalysis';
 import { useEditorStore } from '../../stores/editorStore';
 import { useAppStore } from '../../stores/appStore';
 import { createPrompt, updatePrompt } from '../../services/promptService';
@@ -282,6 +283,12 @@ export function EditorView() {
         <div className="flex-1 overflow-y-auto p-4 space-y-4">
           {activePanel === 'analysis' && (
             <>
+              <PreSendAnalysis
+                prompt={content}
+                model={modelId || 'gpt-4'}
+                autoAnalyze={true}
+                debounceMs={500}
+              />
               <AnalysisPanel />
               <TokenizerVisualization />
             </>
