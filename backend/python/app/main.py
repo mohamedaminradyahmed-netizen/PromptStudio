@@ -17,6 +17,7 @@ from loguru import logger
 from .core.config import settings
 from .core.logging import setup_logging
 from .api.routes import llm_router, commands_router, health_router
+from .api.routes.agents import router as agents_router
 from .websocket.bridge import bridge
 from .websocket.handlers import WebSocketHandlers
 from .services.llm_service import LLMService
@@ -58,6 +59,13 @@ async def lifespan(app: FastAPI):
     app.state.command_service = command_service
     app.state.handlers = handlers
 
+    # Store services dict for agents
+    app.state.agent_services = {
+        "llm_service": llm_service,
+        "instructor_service": instructor_service,
+        "command_service": command_service,
+    }
+
     # Connect to Node.js backend (non-blocking)
     try:
         asyncio.create_task(bridge.connect_to_nodejs())
@@ -91,6 +99,12 @@ app = FastAPI(
     - **Prompt Analysis**: Analyze prompts for quality and safety
     - **Translation**: Multi-language prompt translation
     - **Cost Prediction**: Pre-send cost estimation
+
+    ## Agent Framework
+
+    - **AutoGen Agents**: Research, Planning, and Execution agents
+    - **LangGraph Workflows**: State machine-based orchestration
+    - **Plan-and-Execute Pattern**: Multi-step task automation
     """,
     lifespan=lifespan,
     docs_url="/docs" if settings.debug else None,
@@ -111,6 +125,7 @@ app.add_middleware(
 app.include_router(health_router)
 app.include_router(llm_router, prefix="/api")
 app.include_router(commands_router, prefix="/api")
+app.include_router(agents_router, prefix="/api")
 
 
 # WebSocket endpoint for direct client connections
