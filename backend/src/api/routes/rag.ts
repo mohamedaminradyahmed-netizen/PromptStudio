@@ -1,23 +1,161 @@
 import { Router, Request, Response } from 'express';
-import { RAGService } from '../../services/RAGService';
-import { VectorService } from '../../services/VectorService';
-import { adaptiveRAGService } from '../../services/AdaptiveRAGService';
+import { RAGService } from '../../services/RAGService.js';
+import { VectorService } from '../../services/VectorService.js';
+import { adaptiveRAGService } from '../../services/AdaptiveRAGService.js';
+import { asyncHandler, Errors } from '../middleware/errorHandler.js';
+import { validateBody, validateParams } from '../validation/middleware.js';
+import { z } from 'zod';
 
 const router = Router();
+
+// Validation Schemas
+const createKnowledgeBaseSchema = z.object({
+  name: z.string().min(1, 'Name is required').max(200),
+  description: z.string().max(1000).optional(),
+  domain: z.string().optional(),
+  embeddingModel: z.string().optional(),
+  chunkSize: z.number().int().min(100).max(4000).optional(),
+  chunkOverlap: z.number().int().min(0).max(500).optional(),
+});
+
+const addDocumentsSchema = z.object({
+  documents: z.array(z.object({
+    title: z.string().min(1),
+    content: z.string().min(1),
+    source: z.string().optional(),
+    trustScore: z.number().min(0).max(1).optional(),
+    isVerified: z.boolean().optional(),
+    metadata: z.record(z.any()).optional(),
+  })).min(1, 'At least one document is required'),
+});
+
+const batchIngestSchema = z.object({
+  texts: z.array(z.string().min(1)).min(1, 'At least one text is required'),
+  source: z.string().optional(),
+  trustScore: z.number().min(0).max(1).default(1.0),
+  isVerified: z.boolean().default(false),
+  metadata: z.record(z.any()).optional(),
+});
+
+const updateEmbeddingsSchema = z.object({
+  batchSize: z.number().int().min(1).max(200).default(50),
+});
+
+const retrieveContextSchema = z.object({
+  query: z.string().min(1, 'Query is required'),
+  topK: z.number().int().min(1).max(20).optional(),
+  minRelevance: z.number().min(0).max(1).optional(),
+  minTrust: z.number().min(0).max(1).optional(),
+  verifiedOnly: z.boolean().optional(),
+  useHybridSearch: z.boolean().optional(),
+  trustWeight: z.number().min(0).max(1).optional(),
+});
+
+const retrieveFilteredSchema = z.object({
+  query: z.string().min(1, 'Query is required'),
+  filters: z.object({
+    sources: z.array(z.string()).optional(),
+    minTrust: z.number().min(0).max(1).optional(),
+    maxTrust: z.number().min(0).max(1).optional(),
+    verifiedOnly: z.boolean().optional(),
+    dateFrom: z.string().optional(),
+    dateTo: z.string().optional(),
+    metadata: z.record(z.any()).optional(),
+  }).optional(),
+  topK: z.number().int().min(1).max(20).optional(),
+  minRelevance: z.number().min(0).max(1).optional(),
+});
+
+const buildPromptSchema = z.object({
+  originalPrompt: z.string().min(1, 'Original prompt is required'),
+  knowledgeBaseId: z.string().min(1, 'Knowledge base ID is required'),
+  query: z.string().min(1, 'Query is required'),
+  options: z.object({
+    topK: z.number().int().min(1).max(20).optional(),
+    minRelevance: z.number().min(0).max(1).optional(),
+    minTrust: z.number().min(0).max(1).optional(),
+    verifiedOnly: z.boolean().optional(),
+    useHybridSearch: z.boolean().optional(),
+    trustWeight: z.number().min(0).max(1).optional(),
+    includeSourceAttribution: z.boolean().optional(),
+    includeConfidenceScores: z.boolean().optional(),
+    maxContextLength: z.number().int().positive().optional(),
+    citationFormat: z.string().optional(),
+    includeMetadata: z.boolean().optional(),
+  }).optional(),
+});
+
+const updateTrustScoresSchema = z.object({
+  feedback: z.array(z.object({
+    documentId: z.string(),
+    score: z.number().min(-1).max(1),
+    reason: z.string().optional(),
+  })),
+});
+
+const verifySourceSchema = z.object({
+  source: z.string().min(1, 'Source is required'),
+  verifiedBy: z.string().min(1, 'Verifier is required'),
+});
+
+const chunkTextSchema = z.object({
+  text: z.string().min(1, 'Text is required'),
+  chunkSize: z.number().int().min(100).max(4000).optional(),
+  overlap: z.number().int().min(0).max(500).optional(),
+});
+
+const adaptiveRetrieveSchema = z.object({
+  knowledgeBaseId: z.string().min(1, 'Knowledge base ID is required'),
+  query: z.string().min(1, 'Query is required'),
+  maxChunks: z.number().int().min(1).max(20).default(5),
+  minRelevance: z.number().min(0).max(1).default(0.7),
+  minTrust: z.number().min(0).max(1).default(0.5),
+  enableSummarization: z.boolean().default(true),
+  maxContextLength: z.number().int().positive().default(4000),
+  includeSourceTrace: z.boolean().default(true),
+});
+
+const contextMaskSchema = z.object({
+  knowledgeBaseId: z.string().min(1, 'Knowledge base ID is required'),
+  trustThreshold: z.number().min(0).max(1).default(0.5),
+  verifiedOnly: z.boolean().default(false),
+  allowedDomains: z.array(z.string()).default([]),
+  blockedDomains: z.array(z.string()).default([]),
+});
+
+const trustedSourceSchema = z.object({
+  name: z.string().min(1, 'Name is required'),
+  domain: z.string().optional(),
+  url: z.string().url().optional(),
+  sourceType: z.enum(['document', 'api', 'database', 'web']).default('document'),
+  baseTrustScore: z.number().min(0).max(1).default(0.8),
+  autoVerify: z.boolean().default(false),
+});
+
+const summarizeChunksSchema = z.object({
+  chunks: z.array(z.object({
+    content: z.string(),
+    relevanceScore: z.number().optional(),
+    trustScore: z.number().optional(),
+    source: z.string().optional(),
+  })).min(1, 'Chunks array is required'),
+  query: z.string().min(1, 'Query is required'),
+});
+
+const idParamSchema = z.object({
+  id: z.string().min(1),
+});
 
 // ==================== Knowledge Base Management ====================
 
 /**
  * Create knowledge base
- * إنشاء قاعدة معرفة
  */
-router.post('/knowledge-bases', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases',
+  validateBody(createKnowledgeBaseSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { name, description, domain, embeddingModel, chunkSize, chunkOverlap } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'name is required' });
-    }
 
     const knowledgeBase = await RAGService.createKnowledgeBase({
       name,
@@ -28,57 +166,41 @@ router.post('/knowledge-bases', async (req: Request, res: Response) => {
       chunkOverlap,
     });
 
-    res.json(knowledgeBase);
-  } catch (error) {
-    console.error('Create knowledge base error:', error);
-    res.status(500).json({ error: 'Failed to create knowledge base' });
-  }
-});
+    res.json({ success: true, data: knowledgeBase });
+  })
+);
 
 /**
  * Get knowledge base with statistics
- * الحصول على قاعدة المعرفة مع الإحصائيات
  */
-router.get('/knowledge-bases/:id', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/knowledge-bases/:id',
+  validateParams(idParamSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const knowledgeBase = await RAGService.getKnowledgeBaseWithStats(id);
 
     if (!knowledgeBase) {
-      return res.status(404).json({ error: 'Knowledge base not found' });
+      throw Errors.notFound('Knowledge base');
     }
 
-    res.json(knowledgeBase);
-  } catch (error) {
-    console.error('Get knowledge base error:', error);
-    res.status(500).json({ error: 'Failed to get knowledge base' });
-  }
-});
+    res.json({ success: true, data: knowledgeBase });
+  })
+);
 
 // ==================== Document Ingestion ====================
 
 /**
  * Ingest documents into knowledge base
- * إدخال وثائق إلى قاعدة المعرفة
  */
-router.post('/knowledge-bases/:id/documents', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/documents',
+  validateParams(idParamSchema),
+  validateBody(addDocumentsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { documents } = req.body;
-
-    if (!documents || !Array.isArray(documents) || documents.length === 0) {
-      return res.status(400).json({ error: 'documents array is required' });
-    }
-
-    // Validate document structure
-    for (const doc of documents) {
-      if (!doc.title || !doc.content) {
-        return res.status(400).json({
-          error: 'Each document must have title and content'
-        });
-      }
-    }
 
     const results = await RAGService.addToKnowledgeBase(id, documents);
 
@@ -88,27 +210,25 @@ router.post('/knowledge-bases/:id/documents', async (req: Request, res: Response
 
     res.json({
       success: true,
-      documentsProcessed: results.length,
-      totalChunks,
-      totalTokens,
-      processingTimeMs: totalTime,
-      results,
+      data: {
+        documentsProcessed: results.length,
+        totalChunks,
+        totalTokens,
+        processingTimeMs: totalTime,
+        results,
+      },
     });
-  } catch (error) {
-    console.error('Ingest documents error:', error);
-    res.status(500).json({
-      error: 'Failed to ingest documents',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+  })
+);
 
 /**
  * Batch ingest text content
- * إدخال محتوى نصي بالجملة
  */
-router.post('/knowledge-bases/:id/ingest', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/ingest',
+  validateParams(idParamSchema),
+  validateBody(batchIngestSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const {
       texts,
@@ -117,10 +237,6 @@ router.post('/knowledge-bases/:id/ingest', async (req: Request, res: Response) =
       isVerified = false,
       metadata = {}
     } = req.body;
-
-    if (!texts || !Array.isArray(texts) || texts.length === 0) {
-      return res.status(400).json({ error: 'texts array is required' });
-    }
 
     // Convert texts to documents
     const documents = texts.map((text: string, index: number) => ({
@@ -136,22 +252,23 @@ router.post('/knowledge-bases/:id/ingest', async (req: Request, res: Response) =
 
     res.json({
       success: true,
-      textsProcessed: texts.length,
-      totalChunks: results.reduce((sum, r) => sum + r.chunksCreated, 0),
-      results,
+      data: {
+        textsProcessed: texts.length,
+        totalChunks: results.reduce((sum, r) => sum + r.chunksCreated, 0),
+        results,
+      },
     });
-  } catch (error) {
-    console.error('Batch ingest error:', error);
-    res.status(500).json({ error: 'Failed to ingest texts' });
-  }
-});
+  })
+);
 
 /**
  * Update embeddings for documents without vector embeddings
- * تحديث التضمينات للوثائق بدون تضمينات متجهة
  */
-router.post('/knowledge-bases/:id/update-embeddings', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/update-embeddings',
+  validateParams(idParamSchema),
+  validateBody(updateEmbeddingsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { batchSize = 50 } = req.body;
 
@@ -159,23 +276,24 @@ router.post('/knowledge-bases/:id/update-embeddings', async (req: Request, res: 
 
     res.json({
       success: true,
-      updated: result.updated,
-      failed: result.failed,
+      data: {
+        updated: result.updated,
+        failed: result.failed,
+      },
     });
-  } catch (error) {
-    console.error('Update embeddings error:', error);
-    res.status(500).json({ error: 'Failed to update embeddings' });
-  }
-});
+  })
+);
 
 // ==================== Retrieval Endpoints ====================
 
 /**
  * Retrieve context with vector search
- * استرجاع السياق باستخدام البحث المتجه
  */
-router.post('/knowledge-bases/:id/retrieve', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/retrieve',
+  validateParams(idParamSchema),
+  validateBody(retrieveContextSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const {
       query,
@@ -186,10 +304,6 @@ router.post('/knowledge-bases/:id/retrieve', async (req: Request, res: Response)
       useHybridSearch = true,
       trustWeight = 0.3,
     } = req.body;
-
-    if (!query) {
-      return res.status(400).json({ error: 'query is required' });
-    }
 
     const context = await RAGService.retrieveContext(id, query, {
       topK,
@@ -202,33 +316,34 @@ router.post('/knowledge-bases/:id/retrieve', async (req: Request, res: Response)
 
     res.json({
       success: true,
-      sessionId: context.sessionId,
-      query,
-      chunks: context.chunks,
-      totalRelevance: context.totalRelevance,
-      sources: context.sources,
-      stats: {
-        chunksReturned: context.chunks.length,
-        avgRelevance: context.chunks.length > 0
-          ? context.chunks.reduce((sum, c) => sum + c.relevanceScore, 0) / context.chunks.length
-          : 0,
-        avgTrust: context.chunks.length > 0
-          ? context.chunks.reduce((sum, c) => sum + c.trustScore, 0) / context.chunks.length
-          : 0,
+      data: {
+        sessionId: context.sessionId,
+        query,
+        chunks: context.chunks,
+        totalRelevance: context.totalRelevance,
+        sources: context.sources,
+        stats: {
+          chunksReturned: context.chunks.length,
+          avgRelevance: context.chunks.length > 0
+            ? context.chunks.reduce((sum, c) => sum + c.relevanceScore, 0) / context.chunks.length
+            : 0,
+          avgTrust: context.chunks.length > 0
+            ? context.chunks.reduce((sum, c) => sum + c.trustScore, 0) / context.chunks.length
+            : 0,
+        },
       },
     });
-  } catch (error) {
-    console.error('Retrieve context error:', error);
-    res.status(500).json({ error: 'Failed to retrieve context' });
-  }
-});
+  })
+);
 
 /**
  * Retrieve with advanced filters
- * الاسترجاع مع فلاتر متقدمة
  */
-router.post('/knowledge-bases/:id/retrieve-filtered', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/retrieve-filtered',
+  validateParams(idParamSchema),
+  validateBody(retrieveFilteredSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const {
       query,
@@ -236,10 +351,6 @@ router.post('/knowledge-bases/:id/retrieve-filtered', async (req: Request, res: 
       topK = 5,
       minRelevance = 0.7,
     } = req.body;
-
-    if (!query) {
-      return res.status(400).json({ error: 'query is required' });
-    }
 
     const context = await RAGService.retrieveContextWithFilters(
       id,
@@ -258,34 +369,28 @@ router.post('/knowledge-bases/:id/retrieve-filtered', async (req: Request, res: 
 
     res.json({
       success: true,
-      chunks: context.chunks,
-      totalRelevance: context.totalRelevance,
-      sources: context.sources,
+      data: {
+        chunks: context.chunks,
+        totalRelevance: context.totalRelevance,
+        sources: context.sources,
+      },
     });
-  } catch (error) {
-    console.error('Filtered retrieval error:', error);
-    res.status(500).json({ error: 'Failed to retrieve with filters' });
-  }
-});
+  })
+);
 
 /**
  * Build RAG-enhanced prompt
- * بناء prompt معزز بـ RAG
  */
-router.post('/build-prompt', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/build-prompt',
+  validateBody(buildPromptSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const {
       originalPrompt,
       knowledgeBaseId,
       query,
       options = {}
     } = req.body;
-
-    if (!originalPrompt || !knowledgeBaseId || !query) {
-      return res.status(400).json({
-        error: 'originalPrompt, knowledgeBaseId, and query are required'
-      });
-    }
 
     const context = await RAGService.retrieveContext(knowledgeBaseId, query, {
       topK: options.topK,
@@ -304,170 +409,145 @@ router.post('/build-prompt', async (req: Request, res: Response) => {
     });
 
     res.json({
-      ragPrompt,
-      context,
-      sessionId: context.sessionId,
+      success: true,
+      data: {
+        ragPrompt,
+        context,
+        sessionId: context.sessionId,
+      },
     });
-  } catch (error) {
-    console.error('Build RAG prompt error:', error);
-    res.status(500).json({ error: 'Failed to build RAG prompt' });
-  }
-});
+  })
+);
 
 // ==================== Trust & Verification ====================
 
 /**
  * Update trust scores
- * تحديث درجات الثقة
  */
-router.post('/knowledge-bases/:id/trust-scores', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/trust-scores',
+  validateParams(idParamSchema),
+  validateBody(updateTrustScoresSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { feedback } = req.body;
-
-    if (!feedback || !Array.isArray(feedback)) {
-      return res.status(400).json({ error: 'feedback array is required' });
-    }
 
     const results = await RAGService.updateTrustScores(id, feedback);
 
     res.json({
       success: true,
-      results,
+      data: { results },
     });
-  } catch (error) {
-    console.error('Update trust scores error:', error);
-    res.status(500).json({ error: 'Failed to update trust scores' });
-  }
-});
+  })
+);
 
 /**
  * Verify source
- * التحقق من مصدر
  */
-router.post('/knowledge-bases/:id/verify-source', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/knowledge-bases/:id/verify-source',
+  validateParams(idParamSchema),
+  validateBody(verifySourceSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { source, verifiedBy } = req.body;
-
-    if (!source || !verifiedBy) {
-      return res.status(400).json({ error: 'source and verifiedBy are required' });
-    }
 
     const result = await RAGService.verifySource(id, source, verifiedBy);
 
     res.json({
       success: true,
-      documentsVerified: result.count,
+      data: { documentsVerified: result.count },
     });
-  } catch (error) {
-    console.error('Verify source error:', error);
-    res.status(500).json({ error: 'Failed to verify source' });
-  }
-});
+  })
+);
 
 // ==================== Utility Endpoints ====================
 
 /**
  * Chunk text
- * تقسيم النص
  */
-router.post('/chunk', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/chunk',
+  validateBody(chunkTextSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { text, chunkSize, overlap } = req.body;
-
-    if (!text) {
-      return res.status(400).json({ error: 'text is required' });
-    }
 
     const chunks = RAGService.chunkText(text, { chunkSize, overlap });
 
     res.json({
-      chunks,
-      count: chunks.length,
-      avgChunkSize: chunks.reduce((sum, c) => sum + c.length, 0) / chunks.length,
+      success: true,
+      data: {
+        chunks,
+        count: chunks.length,
+        avgChunkSize: chunks.reduce((sum, c) => sum + c.length, 0) / chunks.length,
+      },
     });
-  } catch (error) {
-    console.error('Chunk text error:', error);
-    res.status(500).json({ error: 'Failed to chunk text' });
-  }
-});
+  })
+);
 
 /**
  * Get embedding statistics
- * الحصول على إحصائيات التضمين
  */
-router.get('/knowledge-bases/:id/stats', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/knowledge-bases/:id/stats',
+  validateParams(idParamSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const stats = await VectorService.getEmbeddingStats(id);
 
-    res.json(stats);
-  } catch (error) {
-    console.error('Get stats error:', error);
-    res.status(500).json({ error: 'Failed to get statistics' });
-  }
-});
+    res.json({ success: true, data: stats });
+  })
+);
 
 /**
  * Delete document
- * حذف وثيقة
  */
-router.delete('/documents/:id', async (req: Request, res: Response) => {
-  try {
+router.delete(
+  '/documents/:id',
+  validateParams(idParamSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
 
     await RAGService.deleteDocument(id);
 
     res.json({ success: true });
-  } catch (error) {
-    console.error('Delete document error:', error);
-    res.status(500).json({ error: 'Failed to delete document' });
-  }
-});
+  })
+);
 
 /**
  * Get recent sessions
- * الحصول على الجلسات الأخيرة
  */
-router.get('/sessions', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/sessions',
+  asyncHandler(async (req: Request, res: Response) => {
     const limit = parseInt(req.query.limit as string) || 10;
 
     const sessions = await RAGService.getRecentSessions(limit);
 
-    res.json(sessions);
-  } catch (error) {
-    console.error('Get sessions error:', error);
-    res.status(500).json({ error: 'Failed to get sessions' });
-  }
-});
+    res.json({ success: true, data: sessions });
+  })
+);
 
 // ==================== Adaptive RAG Endpoints ====================
 
 /**
  * Retrieve adaptive context with dynamic context packing
- * استرجاع سياق تكيفي مع حزم سياق ديناميكية
  */
-router.post('/adaptive/retrieve', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/retrieve',
+  validateBody(adaptiveRetrieveSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const {
       knowledgeBaseId,
       query,
-      maxChunks = 5,
-      minRelevance = 0.7,
-      minTrust = 0.5,
-      enableSummarization = true,
-      maxContextLength = 4000,
-      includeSourceTrace = true,
+      maxChunks,
+      minRelevance,
+      minTrust,
+      enableSummarization,
+      maxContextLength,
+      includeSourceTrace,
     } = req.body;
-
-    if (!knowledgeBaseId || !query) {
-      return res.status(400).json({
-        error: 'knowledgeBaseId and query are required',
-      });
-    }
 
     const result = await adaptiveRAGService.retrieveAdaptiveContext(
       knowledgeBaseId,
@@ -482,33 +562,24 @@ router.post('/adaptive/retrieve', async (req: Request, res: Response) => {
       }
     );
 
-    res.json(result);
-  } catch (error) {
-    console.error('Adaptive RAG retrieval error:', error);
-    res.status(500).json({
-      error: 'Failed to retrieve adaptive context',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 /**
  * Build context mask for trusted sources
- * بناء ماسك سياق للمصادر الموثوقة
  */
-router.post('/adaptive/context-mask', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/context-mask',
+  validateBody(contextMaskSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const {
       knowledgeBaseId,
-      trustThreshold = 0.5,
-      verifiedOnly = false,
-      allowedDomains = [],
-      blockedDomains = [],
+      trustThreshold,
+      verifiedOnly,
+      allowedDomains,
+      blockedDomains,
     } = req.body;
-
-    if (!knowledgeBaseId) {
-      return res.status(400).json({ error: 'knowledgeBaseId is required' });
-    }
 
     const contextMask = await adaptiveRAGService.buildContextMask(
       knowledgeBaseId,
@@ -520,52 +591,43 @@ router.post('/adaptive/context-mask', async (req: Request, res: Response) => {
       }
     );
 
-    res.json(contextMask);
-  } catch (error) {
-    console.error('Context mask error:', error);
-    res.status(500).json({ error: 'Failed to build context mask' });
-  }
-});
+    res.json({ success: true, data: contextMask });
+  })
+);
 
 /**
  * Get RAG session history
- * الحصول على سجل جلسة RAG
  */
-router.get('/adaptive/sessions/:sessionId', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/adaptive/sessions/:sessionId',
+  asyncHandler(async (req: Request, res: Response) => {
     const { sessionId } = req.params;
 
     const session = await adaptiveRAGService.getSessionHistory(sessionId);
 
     if (!session) {
-      return res.status(404).json({ error: 'Session not found' });
+      throw Errors.notFound('Session');
     }
 
-    res.json(session);
-  } catch (error) {
-    console.error('Session history error:', error);
-    res.status(500).json({ error: 'Failed to retrieve session history' });
-  }
-});
+    res.json({ success: true, data: session });
+  })
+);
 
 /**
  * Register a trusted source
- * تسجيل مصدر موثوق
  */
-router.post('/adaptive/trusted-sources', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/trusted-sources',
+  validateBody(trustedSourceSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const {
       name,
       domain,
       url,
-      sourceType = 'document',
-      baseTrustScore = 0.8,
-      autoVerify = false,
+      sourceType,
+      baseTrustScore,
+      autoVerify,
     } = req.body;
-
-    if (!name) {
-      return res.status(400).json({ error: 'name is required' });
-    }
 
     const trustedSource = await adaptiveRAGService.registerTrustedSource({
       name,
@@ -576,43 +638,30 @@ router.post('/adaptive/trusted-sources', async (req: Request, res: Response) => 
       autoVerify,
     });
 
-    res.json(trustedSource);
-  } catch (error) {
-    console.error('Register trusted source error:', error);
-    res.status(500).json({
-      error: 'Failed to register trusted source',
-      details: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-});
+    res.json({ success: true, data: trustedSource });
+  })
+);
 
 /**
  * Summarize chunks with confidence indicators
- * تلخيص المقتطفات مع مؤشرات الثقة
  */
-router.post('/adaptive/summarize', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/adaptive/summarize',
+  validateBody(summarizeChunksSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { chunks, query } = req.body;
-
-    if (!chunks || !Array.isArray(chunks) || chunks.length === 0) {
-      return res.status(400).json({ error: 'chunks array is required' });
-    }
-
-    if (!query) {
-      return res.status(400).json({ error: 'query is required' });
-    }
 
     const enrichedChunks = await adaptiveRAGService.summarizeChunks(chunks, query);
 
     res.json({
-      enrichedChunks,
-      count: enrichedChunks.length,
-      avgConfidence: enrichedChunks.reduce((sum, c) => sum + c.confidenceScore, 0) / enrichedChunks.length,
+      success: true,
+      data: {
+        enrichedChunks,
+        count: enrichedChunks.length,
+        avgConfidence: enrichedChunks.reduce((sum, c) => sum + c.confidenceScore, 0) / enrichedChunks.length,
+      },
     });
-  } catch (error) {
-    console.error('Summarize chunks error:', error);
-    res.status(500).json({ error: 'Failed to summarize chunks' });
-  }
-});
+  })
+);
 
 export default router;

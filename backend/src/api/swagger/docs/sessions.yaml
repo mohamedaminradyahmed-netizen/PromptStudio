@@ -1,0 +1,312 @@
+paths:
+  /api/sessions:
+    get:
+      tags:
+        - Sessions
+      summary: Get user sessions
+      description: Retrieve all collaboration sessions for the current user
+      security:
+        - bearerAuth: []
+      responses:
+        '200':
+          description: List of sessions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Session'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+    post:
+      tags:
+        - Sessions
+      summary: Create new session
+      description: Create a new collaboration session
+      security:
+        - bearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - name
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                  example: My Prompt Session
+                description:
+                  type: string
+                  maxLength: 1000
+                  example: A session for developing AI prompts
+                content:
+                  type: string
+                  example: Initial prompt content
+      responses:
+        '201':
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: '#/components/schemas/Session'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+
+  /api/sessions/{id}:
+    get:
+      tags:
+        - Sessions
+      summary: Get session by ID
+      description: Retrieve a specific session with all details
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session details
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    allOf:
+                      - $ref: '#/components/schemas/Session'
+                      - type: object
+                        properties:
+                          content:
+                            type: string
+                          members:
+                            type: array
+                            items:
+                              type: object
+                          comments:
+                            type: array
+                            items:
+                              type: object
+                          snapshots:
+                            type: array
+                            items:
+                              type: object
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Access denied
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    patch:
+      tags:
+        - Sessions
+      summary: Update session
+      description: Update session details (owner only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 200
+                description:
+                  type: string
+                  maxLength: 1000
+                isActive:
+                  type: boolean
+      responses:
+        '200':
+          description: Session updated
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Only owner can update
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+    delete:
+      tags:
+        - Sessions
+      summary: Delete session
+      description: Delete a session (owner only)
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: Session deleted
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Only owner can delete
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+
+  /api/sessions/{id}/members:
+    post:
+      tags:
+        - Sessions
+      summary: Invite member
+      description: Invite a user to the session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - email
+              properties:
+                email:
+                  type: string
+                  format: email
+                role:
+                  type: string
+                  enum: [VIEWER, EDITOR, OWNER]
+                  default: VIEWER
+      responses:
+        '201':
+          description: Member invited
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Only owner can invite
+        '404':
+          $ref: '#/components/responses/NotFoundError'
+        '409':
+          description: User is already a member
+
+  /api/sessions/{id}/history:
+    get:
+      tags:
+        - Sessions
+      summary: Get edit history
+      description: Retrieve the edit history for a session
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: pageSize
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        '200':
+          description: Edit history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: array
+                    items:
+                      type: object
+                  meta:
+                    $ref: '#/components/schemas/Pagination'
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Access denied
+
+  /api/sessions/{id}/snapshots:
+    post:
+      tags:
+        - Sessions
+      summary: Create snapshot
+      description: Create a snapshot of the current session state
+      security:
+        - bearerAuth: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  maxLength: 200
+      responses:
+        '201':
+          description: Snapshot created
+        '401':
+          $ref: '#/components/responses/UnauthorizedError'
+        '403':
+          description: Permission denied
+        '404':
+          $ref: '#/components/responses/NotFoundError'

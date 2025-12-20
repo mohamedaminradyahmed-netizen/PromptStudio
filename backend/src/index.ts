@@ -3,6 +3,7 @@ import cors from 'cors';
 import { createServer } from 'http';
 import { Server as SocketIOServer } from 'socket.io';
 import dotenv from 'dotenv';
+import swaggerUi from 'swagger-ui-express';
 
 import { setupWebSocket } from './websocket/index.js';
 import { authRouter } from './api/routes/auth.js';
@@ -15,8 +16,9 @@ import chainRoutes from './api/routes/chains.js';
 import reasoningRoutes from './api/routes/reasoning.js';
 import refinementRoutes from './api/routes/refinement.js';
 import predictionRoutes from './api/routes/prediction.js';
-import { errorHandler } from './api/middleware/errorHandler.js';
+import { errorHandler, notFoundHandler } from './api/middleware/errorHandler.js';
 import { authMiddleware } from './api/middleware/auth.js';
+import { swaggerSpec } from './api/swagger/config.js';
 
 dotenv.config();
 
@@ -41,9 +43,32 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
+// Swagger Documentation
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec, {
+  customCss: '.swagger-ui .topbar { display: none }',
+  customSiteTitle: 'PromptStudio API Documentation',
+  swaggerOptions: {
+    persistAuthorization: true,
+    displayRequestDuration: true,
+    filter: true,
+    showExtensions: true,
+  },
+}));
+
+// Swagger JSON endpoint
+app.get('/api/docs.json', (req, res) => {
+  res.setHeader('Content-Type', 'application/json');
+  res.send(swaggerSpec);
+});
+
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  res.json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    version: '1.0.0',
+    docs: '/api/docs',
+  });
 });
 
 // API Routes
@@ -58,6 +83,9 @@ app.use('/api/reasoning', reasoningRoutes);
 app.use('/api/refinement', refinementRoutes);
 app.use('/api/prediction', predictionRoutes);
 
+// 404 handler
+app.use(notFoundHandler);
+
 // Error handler
 app.use(errorHandler);
 
@@ -70,6 +98,7 @@ const PORT = process.env.PORT || 3001;
 httpServer.listen(PORT, () => {
   console.log(`🚀 PromptStudio Backend running on port ${PORT}`);
   console.log(`📡 WebSocket server ready`);
+  console.log(`📚 API Documentation: http://localhost:${PORT}/api/docs`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
 

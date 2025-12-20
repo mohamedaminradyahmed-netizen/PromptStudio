@@ -4,6 +4,16 @@ import { v4 as uuidv4 } from 'uuid';
 import prisma from '../../lib/prisma.js';
 import { config } from '../../config/index.js';
 import { authMiddleware, AuthRequest } from '../middleware/auth.js';
+import { asyncHandler, Errors, ErrorCodes } from '../middleware/errorHandler.js';
+import { validateBody } from '../validation/middleware.js';
+import {
+  registerSchema,
+  loginSchema,
+  updateProfileSchema,
+  type RegisterInput,
+  type LoginInput,
+  type UpdateProfileInput,
+} from '../validation/schemas.js';
 
 const router = Router();
 
@@ -17,17 +27,11 @@ function generateColor(): string {
 }
 
 // Register
-router.post('/register', async (req: Request, res: Response) => {
-  try {
-    const { email, name, password } = req.body;
-
-    if (!email || !name) {
-      res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Email and name are required' },
-      });
-      return;
-    }
+router.post(
+  '/register',
+  validateBody(registerSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { email, name } = req.body as RegisterInput;
 
     // Check if user exists
     const existingUser = await prisma.user.findUnique({
@@ -35,11 +39,7 @@ router.post('/register', async (req: Request, res: Response) => {
     });
 
     if (existingUser) {
-      res.status(409).json({
-        success: false,
-        error: { code: 'USER_EXISTS', message: 'User with this email already exists' },
-      });
-      return;
+      throw Errors.conflict('User with this email already exists');
     }
 
     // Create user
@@ -79,27 +79,15 @@ router.post('/register', async (req: Request, res: Response) => {
         expiresAt,
       },
     });
-  } catch (error) {
-    console.error('Registration error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'REGISTRATION_ERROR', message: 'Failed to register user' },
-    });
-  }
-});
+  })
+);
 
-// Login (simplified - in production use proper password hashing)
-router.post('/login', async (req: Request, res: Response) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      res.status(400).json({
-        success: false,
-        error: { code: 'VALIDATION_ERROR', message: 'Email is required' },
-      });
-      return;
-    }
+// Login
+router.post(
+  '/login',
+  validateBody(loginSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { email } = req.body as LoginInput;
 
     // Find user
     const user = await prisma.user.findUnique({
@@ -107,11 +95,7 @@ router.post('/login', async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
-      });
-      return;
+      throw Errors.notFound('User');
     }
 
     // Generate token
@@ -142,18 +126,14 @@ router.post('/login', async (req: Request, res: Response) => {
         expiresAt,
       },
     });
-  } catch (error) {
-    console.error('Login error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'LOGIN_ERROR', message: 'Failed to login' },
-    });
-  }
-});
+  })
+);
 
 // Get current user
-router.get('/me', authMiddleware, async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/me',
+  authMiddleware,
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
 
     const user = await prisma.user.findUnique({
@@ -161,11 +141,7 @@ router.get('/me', authMiddleware, async (req: Request, res: Response) => {
     });
 
     if (!user) {
-      res.status(404).json({
-        success: false,
-        error: { code: 'USER_NOT_FOUND', message: 'User not found' },
-      });
-      return;
+      throw Errors.notFound('User');
     }
 
     res.json({
@@ -178,20 +154,17 @@ router.get('/me', authMiddleware, async (req: Request, res: Response) => {
         color: user.color,
       },
     });
-  } catch (error) {
-    console.error('Get user error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to get user' },
-    });
-  }
-});
+  })
+);
 
 // Update profile
-router.patch('/me', authMiddleware, async (req: Request, res: Response) => {
-  try {
+router.patch(
+  '/me',
+  authMiddleware,
+  validateBody(updateProfileSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const authReq = req as AuthRequest;
-    const { name, avatar, color } = req.body;
+    const { name, avatar, color } = req.body as UpdateProfileInput;
 
     const user = await prisma.user.update({
       where: { id: authReq.userId },
@@ -212,18 +185,13 @@ router.patch('/me', authMiddleware, async (req: Request, res: Response) => {
         color: user.color,
       },
     });
-  } catch (error) {
-    console.error('Update profile error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to update profile' },
-    });
-  }
-});
+  })
+);
 
 // Guest login (for quick access)
-router.post('/guest', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/guest',
+  asyncHandler(async (req: Request, res: Response) => {
     const guestId = uuidv4();
     const guestName = `Guest_${guestId.slice(0, 6)}`;
 
@@ -265,13 +233,7 @@ router.post('/guest', async (req: Request, res: Response) => {
         isGuest: true,
       },
     });
-  } catch (error) {
-    console.error('Guest login error:', error);
-    res.status(500).json({
-      success: false,
-      error: { code: 'ERROR', message: 'Failed to create guest account' },
-    });
-  }
-});
+  })
+);
 
 export { router as authRouter };

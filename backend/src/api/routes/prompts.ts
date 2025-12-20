@@ -1,17 +1,37 @@
 import { Router, Request, Response } from 'express';
-import { PromptService } from '../../services/PromptService';
-import { LLMServiceAdapter } from '../../services/LLMServiceAdapter';
-import { SafetyService } from '../../services/SafetyService';
-import { RAGService } from '../../services/RAGService';
-import { PromptChainService } from '../../services/PromptChainService';
-import { PromptOptimizationService } from '../../services/PromptOptimizationService';
+import { PromptService } from '../../services/PromptService.js';
+import { LLMServiceAdapter } from '../../services/LLMServiceAdapter.js';
+import { SafetyService } from '../../services/SafetyService.js';
+import { PromptOptimizationService } from '../../services/PromptOptimizationService.js';
 import {
   BayesianPromptOptimizer,
   quickOptimize,
   comparePrompts,
   ExperimentConfig,
   ExperimentResult,
-} from '../../services/BayesianPromptOptimizer';
+} from '../../services/BayesianPromptOptimizer.js';
+import { asyncHandler, Errors } from '../middleware/errorHandler.js';
+import { validateBody, validateQuery } from '../validation/middleware.js';
+import {
+  hierarchicalPromptSchema,
+  metaPromptSchema,
+  sessionMetaPromptSchema,
+  analyzePromptSchema,
+  treeOfThoughtSchema,
+  graphOfThoughtSchema,
+  toolPlanSchema,
+  executePlanSchema,
+  selfRefineSchema,
+  createVersionSchema,
+  safetyCheckSchema,
+  bayesianOptimizeSchema,
+  evolutionaryOptimizeSchema,
+  abTestSchema,
+  experimentConfigSchema,
+  comparePromptsSchema,
+  paginationSchema,
+} from '../validation/schemas.js';
+import { z } from 'zod';
 
 // In-memory store for experiment history (in production, use database)
 const experimentHistory: Map<string, ExperimentResult> = new Map();
@@ -19,8 +39,10 @@ const experimentHistory: Map<string, ExperimentResult> = new Map();
 const router = Router();
 
 // Build hierarchical prompt
-router.post('/build-hierarchical', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/build-hierarchical',
+  validateBody(hierarchicalPromptSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { systemPrompt, processPrompt, taskPrompt, outputPrompt } = req.body;
 
     const fullPrompt = PromptService.buildHierarchicalPrompt({
@@ -30,15 +52,15 @@ router.post('/build-hierarchical', async (req: Request, res: Response) => {
       outputPrompt,
     });
 
-    res.json({ fullPrompt });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to build hierarchical prompt' });
-  }
-});
+    res.json({ success: true, data: { fullPrompt } });
+  })
+);
 
 // Generate meta-prompt
-router.post('/generate-meta', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/generate-meta',
+  validateBody(metaPromptSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { persona, domain, timeConstraint, metaInstructions } = req.body;
 
     const metaPrompt = PromptService.generateMetaPrompt({
@@ -48,20 +70,16 @@ router.post('/generate-meta', async (req: Request, res: Response) => {
       metaInstructions,
     });
 
-    res.json({ metaPrompt });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to generate meta-prompt' });
-  }
-});
+    res.json({ success: true, data: { metaPrompt } });
+  })
+);
 
 // Generate session-fixed meta-prompt
-router.post('/generate-session-meta', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/generate-session-meta',
+  validateBody(sessionMetaPromptSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { sessionId, persona, domain, timeConstraint, metaInstructions } = req.body;
-
-    if (!sessionId) {
-      return res.status(400).json({ error: 'Session ID is required' });
-    }
 
     const metaPrompt = PromptService.generateSessionMetaPrompt(sessionId, {
       persona,
@@ -70,28 +88,27 @@ router.post('/generate-session-meta', async (req: Request, res: Response) => {
       metaInstructions,
     });
 
-    res.json({ metaPrompt, cached: true });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to generate session meta-prompt' });
-  }
-});
+    res.json({ success: true, data: { metaPrompt, cached: true } });
+  })
+);
 
 // Clear session meta-prompt cache
-router.delete('/session-meta/:sessionId', async (req: Request, res: Response) => {
-  try {
+router.delete(
+  '/session-meta/:sessionId',
+  asyncHandler(async (req: Request, res: Response) => {
     const { sessionId } = req.params;
 
     PromptService.clearSessionMetaPrompt(sessionId);
 
     res.json({ success: true, message: 'Session meta-prompt cleared' });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to clear session meta-prompt' });
-  }
-});
+  })
+);
 
 // Analyze prompt before sending
-router.post('/analyze', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/analyze',
+  validateBody(analyzePromptSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, model } = req.body;
 
     const tokens = PromptService.estimateTokens(prompt);
@@ -103,22 +120,25 @@ router.post('/analyze', async (req: Request, res: Response) => {
     const safetyCheck = await SafetyService.performSafetyCheck(prompt);
 
     res.json({
-      estimatedTokens: tokens,
-      estimatedCost: cost,
-      successProbability,
-      safetyScore,
-      validation,
-      safetyIssues: safetyCheck.issues,
-      recommendations: safetyCheck.recommendations,
+      success: true,
+      data: {
+        estimatedTokens: tokens,
+        estimatedCost: cost,
+        successProbability,
+        safetyScore,
+        validation,
+        safetyIssues: safetyCheck.issues,
+        recommendations: safetyCheck.recommendations,
+      },
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to analyze prompt' });
-  }
-});
+  })
+);
 
 // Execute Tree-of-Thought reasoning
-router.post('/tree-of-thought', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/tree-of-thought',
+  validateBody(treeOfThoughtSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, maxDepth, branchingFactor } = req.body;
 
     const result = await LLMServiceAdapter.executeTreeOfThought(prompt, {
@@ -126,43 +146,43 @@ router.post('/tree-of-thought', async (req: Request, res: Response) => {
       branchingFactor,
     });
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to execute tree-of-thought' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Execute Graph-of-Thought reasoning
-router.post('/graph-of-thought', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/graph-of-thought',
+  validateBody(graphOfThoughtSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, maxNodes } = req.body;
 
     const result = await LLMServiceAdapter.executeGraphOfThought(prompt, {
       maxNodes,
     });
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to execute graph-of-thought' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Generate tool plan (legacy)
-router.post('/tool-plan', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/tool-plan',
+  validateBody(toolPlanSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, availableTools } = req.body;
 
     const plan = await LLMServiceAdapter.generateToolPlan(prompt, availableTools);
 
-    res.json({ plan });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to generate tool plan' });
-  }
-});
+    res.json({ success: true, data: { plan } });
+  })
+);
 
 // Advanced tool planning with reasoning
-router.post('/plan-tools', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/plan-tools',
+  validateBody(toolPlanSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, availableTools, maxTools, requireApproval } = req.body;
 
     const result = await LLMServiceAdapter.planToolUsage({
@@ -172,21 +192,24 @@ router.post('/plan-tools', async (req: Request, res: Response) => {
       requireApproval: requireApproval !== false,
     });
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to plan tool usage' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Execute approved tool plan
-router.post('/execute-plan', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/execute-plan',
+  validateBody(executePlanSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { plan, approved } = req.body;
 
     if (!approved) {
       res.json({
-        results: [],
-        summary: 'Execution cancelled - plan not approved',
+        success: true,
+        data: {
+          results: [],
+          summary: 'Execution cancelled - plan not approved',
+        },
       });
       return;
     }
@@ -196,15 +219,15 @@ router.post('/execute-plan', async (req: Request, res: Response) => {
 
     const result = await LLMServiceAdapter.executePlan(plan, approved, mockExecutors);
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to execute tool plan' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Self-refine prompt
-router.post('/self-refine', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/self-refine',
+  validateBody(selfRefineSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, executionResult, qualityMetrics } = req.body;
 
     const refinement = await LLMServiceAdapter.selfRefinePrompt(
@@ -213,15 +236,15 @@ router.post('/self-refine', async (req: Request, res: Response) => {
       qualityMetrics
     );
 
-    res.json(refinement);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to self-refine prompt' });
-  }
-});
+    res.json({ success: true, data: refinement });
+  })
+);
 
 // Create prompt version
-router.post('/:id/versions', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/:id/versions',
+  validateBody(createVersionSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
     const { content, components, refinementReason, qualityScore } = req.body;
 
@@ -233,41 +256,40 @@ router.post('/:id/versions', async (req: Request, res: Response) => {
       qualityScore
     );
 
-    res.json(version);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create prompt version' });
-  }
-});
+    res.json({ success: true, data: version });
+  })
+);
 
 // Get prompt versions
-router.get('/:id/versions', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/:id/versions',
+  asyncHandler(async (req: Request, res: Response) => {
     const { id } = req.params;
 
     const versions = await PromptService.getPromptVersions(id);
 
-    res.json(versions);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to get prompt versions' });
-  }
-});
+    res.json({ success: true, data: versions });
+  })
+);
 
 // Safety check
-router.post('/safety-check', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/safety-check',
+  validateBody(safetyCheckSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { content, options } = req.body;
 
     const result = await SafetyService.performSafetyCheck(content, options);
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to perform safety check' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Optimize prompt (Bayesian)
-router.post('/optimize/bayesian', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/optimize/bayesian',
+  validateBody(bayesianOptimizeSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, iterations, populationSize } = req.body;
 
     const result = await PromptOptimizationService.bayesianOptimization(prompt, {
@@ -275,15 +297,15 @@ router.post('/optimize/bayesian', async (req: Request, res: Response) => {
       populationSize,
     });
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to optimize prompt' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Optimize prompt (Evolutionary)
-router.post('/optimize/evolutionary', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/optimize/evolutionary',
+  validateBody(evolutionaryOptimizeSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompt, generations, populationSize } = req.body;
 
     const result = await PromptOptimizationService.evolutionaryOptimization(prompt, {
@@ -291,40 +313,33 @@ router.post('/optimize/evolutionary', async (req: Request, res: Response) => {
       populationSize,
     });
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to optimize prompt' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // A/B test prompts
-router.post('/ab-test', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/ab-test',
+  validateBody(abTestSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { promptA, promptB, iterations } = req.body;
 
     const result = await PromptOptimizationService.abTest(promptA, promptB, iterations);
 
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to perform A/B test' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // ============================================================================
 // Bayesian/Evolutionary Prompt Optimization Experiments
 // ============================================================================
 
 // Run full Bayesian optimization experiment
-router.post('/experiments/bayesian', async (req: Request, res: Response) => {
-  try {
-    const { prompt, config } = req.body as {
-      prompt: string;
-      config?: Partial<ExperimentConfig>;
-    };
-
-    if (!prompt || typeof prompt !== 'string') {
-      return res.status(400).json({ error: 'Prompt is required' });
-    }
+router.post(
+  '/experiments/bayesian',
+  validateBody(experimentConfigSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { prompt, config } = req.body;
 
     const optimizer = new BayesianPromptOptimizer(prompt, config);
     const result = await optimizer.runExperiment();
@@ -332,114 +347,89 @@ router.post('/experiments/bayesian', async (req: Request, res: Response) => {
     // Store in history
     experimentHistory.set(result.experimentId, result);
 
-    res.json({
-      success: true,
-      data: result,
-    });
-  } catch (error) {
-    console.error('Bayesian experiment failed:', error);
-    res.status(500).json({ error: 'Failed to run Bayesian optimization experiment' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Quick optimization (simplified, fewer iterations)
-router.post('/experiments/quick-optimize', async (req: Request, res: Response) => {
-  try {
-    const { prompt, options } = req.body;
+router.post(
+  '/experiments/quick-optimize',
+  validateBody(experimentConfigSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { prompt, config } = req.body;
 
-    if (!prompt || typeof prompt !== 'string') {
-      return res.status(400).json({ error: 'Prompt is required' });
-    }
-
-    const result = await quickOptimize(prompt, options);
+    const result = await quickOptimize(prompt, config);
 
     // Store in history
     experimentHistory.set(result.experimentId, result);
 
-    res.json({
-      success: true,
-      data: result,
-    });
-  } catch (error) {
-    console.error('Quick optimization failed:', error);
-    res.status(500).json({ error: 'Failed to run quick optimization' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Compare multiple prompts
-router.post('/experiments/compare', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/experiments/compare',
+  validateBody(comparePromptsSchema),
+  asyncHandler(async (req: Request, res: Response) => {
     const { prompts, evaluationRounds } = req.body;
-
-    if (!prompts || !Array.isArray(prompts) || prompts.length < 2) {
-      return res.status(400).json({ error: 'At least 2 prompts are required for comparison' });
-    }
 
     const result = await comparePrompts(prompts, evaluationRounds);
 
-    res.json({
-      success: true,
-      data: result,
-    });
-  } catch (error) {
-    console.error('Prompt comparison failed:', error);
-    res.status(500).json({ error: 'Failed to compare prompts' });
-  }
-});
+    res.json({ success: true, data: result });
+  })
+);
 
 // Get experiment history
-router.get('/experiments/history', async (req: Request, res: Response) => {
-  try {
-    const { limit = 20, offset = 0 } = req.query;
+router.get(
+  '/experiments/history',
+  validateQuery(paginationSchema),
+  asyncHandler(async (req: Request, res: Response) => {
+    const { limit = 20, offset = 0 } = req.query as { limit?: number; offset?: number };
 
     const experiments = Array.from(experimentHistory.values())
       .sort((a, b) => new Date(b.startTime).getTime() - new Date(a.startTime).getTime())
-      .slice(Number(offset), Number(offset) + Number(limit));
+      .slice(offset, offset + limit);
 
     res.json({
       success: true,
       data: {
         experiments,
         total: experimentHistory.size,
-        limit: Number(limit),
-        offset: Number(offset),
+        limit,
+        offset,
       },
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch experiment history' });
-  }
-});
+  })
+);
 
 // Get specific experiment by ID
-router.get('/experiments/:experimentId', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/experiments/:experimentId',
+  asyncHandler(async (req: Request, res: Response) => {
     const { experimentId } = req.params;
 
     const experiment = experimentHistory.get(experimentId);
 
     if (!experiment) {
-      return res.status(404).json({ error: 'Experiment not found' });
+      throw Errors.notFound('Experiment');
     }
 
-    res.json({
-      success: true,
-      data: experiment,
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch experiment' });
-  }
-});
+    res.json({ success: true, data: experiment });
+  })
+);
 
 // Get experiment trials/details
-router.get('/experiments/:experimentId/trials', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/experiments/:experimentId/trials',
+  asyncHandler(async (req: Request, res: Response) => {
     const { experimentId } = req.params;
     const { iteration } = req.query;
 
     const experiment = experimentHistory.get(experimentId);
 
     if (!experiment) {
-      return res.status(404).json({ error: 'Experiment not found' });
+      throw Errors.notFound('Experiment');
     }
 
     let trials = experiment.trials;
@@ -456,20 +446,19 @@ router.get('/experiments/:experimentId/trials', async (req: Request, res: Respon
         summary: experiment.summary,
       },
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch experiment trials' });
-  }
-});
+  })
+);
 
 // Apply best prompt from experiment (mark as selected)
-router.post('/experiments/:experimentId/apply', async (req: Request, res: Response) => {
-  try {
+router.post(
+  '/experiments/:experimentId/apply',
+  asyncHandler(async (req: Request, res: Response) => {
     const { experimentId } = req.params;
 
     const experiment = experimentHistory.get(experimentId);
 
     if (!experiment) {
-      return res.status(404).json({ error: 'Experiment not found' });
+      throw Errors.notFound('Experiment');
     }
 
     res.json({
@@ -481,38 +470,33 @@ router.post('/experiments/:experimentId/apply', async (req: Request, res: Respon
         message: 'Best prompt has been selected for use',
       },
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to apply experiment result' });
-  }
-});
+  })
+);
 
 // Delete experiment from history
-router.delete('/experiments/:experimentId', async (req: Request, res: Response) => {
-  try {
+router.delete(
+  '/experiments/:experimentId',
+  asyncHandler(async (req: Request, res: Response) => {
     const { experimentId } = req.params;
 
     if (!experimentHistory.has(experimentId)) {
-      return res.status(404).json({ error: 'Experiment not found' });
+      throw Errors.notFound('Experiment');
     }
 
     experimentHistory.delete(experimentId);
 
-    res.json({
-      success: true,
-      message: 'Experiment deleted successfully',
-    });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to delete experiment' });
-  }
-});
+    res.json({ success: true, message: 'Experiment deleted successfully' });
+  })
+);
 
 // Get optimization statistics
-router.get('/experiments/stats/summary', async (req: Request, res: Response) => {
-  try {
+router.get(
+  '/experiments/stats/summary',
+  asyncHandler(async (req: Request, res: Response) => {
     const experiments = Array.from(experimentHistory.values());
 
     if (experiments.length === 0) {
-      return res.json({
+      res.json({
         success: true,
         data: {
           totalExperiments: 0,
@@ -521,6 +505,7 @@ router.get('/experiments/stats/summary', async (req: Request, res: Response) => 
           mostEffectiveMutation: null,
         },
       });
+      return;
     }
 
     const totalExperiments = experiments.length;
@@ -563,9 +548,7 @@ router.get('/experiments/stats/summary', async (req: Request, res: Response) => 
         ),
       },
     });
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch experiment statistics' });
-  }
-});
+  })
+);
 
 export default router;
