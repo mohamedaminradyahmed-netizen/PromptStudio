@@ -295,14 +295,21 @@ model PromptChain {
   contextMemory Json?    @default("{}")
   isActive      Boolean  @default(true)
 
+  // Pipeline settings
+  pipelineType  String   @default("custom") // standard, analysis, creative, technical
+  enableMemory  Boolean  @default(true)     // Enable long-term memory
+  reuseContext  Boolean  @default(true)     // Reuse context from similar tasks
+
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
   // Relations
   prompt        MarketplacePrompt @relation(fields: [promptId], references: [id], onDelete: Cascade)
   executions    ChainExecution[]
+  memoryStates  ChainMemoryState[]
 
   @@index([promptId])
+  @@index([pipelineType])
 }
 
 // Chain Execution History
@@ -508,4 +515,58 @@ model MarketplaceReview {
   reviewer      User?             @relation(fields: [reviewerId], references: [id])
 
   @@index([promptId])
+}
+
+// Long Term Memory for Prompt Chaining
+model LongTermMemory {
+  id              String   @id @default(uuid())
+  type            String   // task_context, stage_output, user_preference, pattern, insight
+  key             String
+  content         String
+  metadata        Json     @default("{}")
+  embedding       Json?    // Vector embedding for semantic search
+  tags            String[] @default([])
+
+  // Usage tracking
+  accessCount     Int      @default(0)
+  relevanceScore  Float    @default(1.0)
+
+  // Timestamps
+  createdAt       DateTime @default(now())
+  lastAccessedAt  DateTime @default(now())
+  expiresAt       DateTime?
+
+  @@unique([type, key])
+  @@index([type])
+  @@index([tags])
+  @@index([relevanceScore])
+  @@index([lastAccessedAt])
+}
+
+// Chain Memory State for persistent chain context
+model ChainMemoryState {
+  id              String   @id @default(uuid())
+  chainId         String
+  sessionId       String?  // Optional session binding
+
+  // Memory state
+  shortTermMemory Json     @default("{}") // Current execution context
+  workingMemory   Json     @default("{}") // Intermediate results
+  longTermRefs    String[] @default([])   // References to LongTermMemory records
+
+  // Stage history
+  stageHistory    Json     @default("[]") // Array of stage executions
+  currentStage    String?
+
+  // Metadata
+  isActive        Boolean  @default(true)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  // Relations
+  chain           PromptChain @relation(fields: [chainId], references: [id], onDelete: Cascade)
+
+  @@unique([chainId, sessionId])
+  @@index([chainId])
+  @@index([isActive])
 }
