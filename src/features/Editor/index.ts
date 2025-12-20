@@ -7,3 +7,4 @@ export { ToolDefinitionPanel } from './ToolDefinitionPanel';
 export { SmartVariables } from './SmartVariables';
 export { VoiceInput } from './VoiceInput';
 export { AIGenerator } from './AIGenerator';
+export { PreSendAnalysis } from './PreSendAnalysis';
