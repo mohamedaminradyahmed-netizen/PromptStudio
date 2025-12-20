@@ -182,13 +182,34 @@ export class MarketplaceService {
     return prompt;
   }
 
-  // Create a new marketplace prompt
-  static async createPrompt(data: CreateMarketplacePromptData) {
+  // Create a new marketplace prompt with advanced features
+  static async createPrompt(data: CreateMarketplacePromptData & {
+    systemPrompt?: string;
+    processPrompt?: string;
+    taskPrompt?: string;
+    outputPrompt?: string;
+    persona?: string;
+    domain?: string;
+    reasoningMode?: string;
+    ragEnabled?: boolean;
+    toolPlanning?: boolean;
+    selfRefinement?: boolean;
+  }) {
     return await prisma.marketplacePrompt.create({
       data: {
         title: data.title,
         description: data.description,
         content: data.content,
+        systemPrompt: data.systemPrompt,
+        processPrompt: data.processPrompt,
+        taskPrompt: data.taskPrompt,
+        outputPrompt: data.outputPrompt,
+        persona: data.persona,
+        domain: data.domain,
+        reasoningMode: data.reasoningMode || 'default',
+        ragEnabled: data.ragEnabled || false,
+        toolPlanning: data.toolPlanning || false,
+        selfRefinement: data.selfRefinement || false,
         category: data.category,
         tags: data.tags,
         modelRecommendation: data.modelRecommendation,
