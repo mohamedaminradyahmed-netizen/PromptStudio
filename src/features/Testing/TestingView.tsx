@@ -34,7 +34,7 @@ import { useAppStore } from '../../stores/appStore';
 import { useEditorStore } from '../../stores/editorStore';
 import clsx from 'clsx';
 
-type TestingTab = 'ab-testing' | 'golden-datasets' | 'evaluation';
+type TestingTab = 'ab-testing' | 'golden-datasets' | 'evaluation' | 'reasoning';
 
 interface ABTestVariant {
   id: string;
@@ -85,6 +85,7 @@ export function TestingView() {
             { id: 'ab-testing', label: 'A/B Testing' },
             { id: 'golden-datasets', label: 'Golden Datasets' },
             { id: 'evaluation', label: 'LLM Evaluation' },
+            { id: 'reasoning', label: 'ToT/GoT Reasoning' },
           ].map((tab) => (
             <button
               key={tab.id}
@@ -110,6 +111,7 @@ export function TestingView() {
         {activeTab === 'ab-testing' && <ABTestingPanel theme={theme} currentPrompt={content} />}
         {activeTab === 'golden-datasets' && <GoldenDatasetsPanel theme={theme} />}
         {activeTab === 'evaluation' && <EvaluationPanel theme={theme} />}
+        {activeTab === 'reasoning' && <ReasoningPanel theme={theme} currentPrompt={content} />}
       </div>
     </div>
   );
@@ -531,6 +533,421 @@ function GoldenDatasetsPanel({ theme }: { theme: 'light' | 'dark' }) {
               </div>
             ))}
           </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+interface ReasoningPath {
+  nodes: Array<{
+    id: string;
+    content: string;
+    score: number;
+    depth: number;
+  }>;
+  totalScore: number;
+  finalAnswer: string;
+}
+
+interface PathEvaluation {
+  pathId: string;
+  score: number;
+  reasoning: string;
+  strengths: string[];
+  weaknesses: string[];
+}
+
+function ReasoningPanel({ theme, currentPrompt }: { theme: 'light' | 'dark'; currentPrompt: string }) {
+  const [prompt, setPrompt] = useState(currentPrompt || '');
+  const [reasoningType, setReasoningType] = useState<'tree' | 'graph' | 'multi'>('tree');
+  const [isRunning, setIsRunning] = useState(false);
+  const [result, setResult] = useState<any>(null);
+  const [config, setConfig] = useState({
+    maxDepth: 3,
+    branchingFactor: 3,
+    numPaths: 3,
+    maxNodes: 10,
+  });
+  const [selectedPath, setSelectedPath] = useState<number | null>(null);
+
+  const runReasoning = async () => {
+    if (!prompt) return;
+
+    setIsRunning(true);
+    setResult(null);
+
+    try {
+      const apiUrl = process.env.REACT_APP_API_URL || 'http://localhost:3001';
+      let endpoint = '';
+      let body = {};
+
+      if (reasoningType === 'tree') {
+        endpoint = '/api/reasoning/tree-of-thought';
+        body = {
+          prompt,
+          maxDepth: config.maxDepth,
+          branchingFactor: config.branchingFactor,
+        };
+      } else if (reasoningType === 'graph') {
+        endpoint = '/api/reasoning/graph-of-thought';
+        body = {
+          prompt,
+          maxNodes: config.maxNodes,
+        };
+      } else {
+        endpoint = '/api/reasoning/multi-path-reasoning';
+        body = {
+          prompt,
+          numPaths: config.numPaths,
+          maxDepth: config.maxDepth,
+          branchingFactor: config.branchingFactor,
+        };
+      }
+
+      const response = await fetch(`${apiUrl}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await response.json();
+      setResult(data);
+    } catch (error) {
+      console.error('Reasoning error:', error);
+    } finally {
+      setIsRunning(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className={clsx('text-lg font-semibold', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+          Tree/Graph-of-Thought Reasoning
+        </h2>
+        <button
+          onClick={runReasoning}
+          disabled={isRunning || !prompt}
+          className={clsx(
+            'px-4 py-2 rounded-lg flex items-center gap-2 text-sm font-medium transition-colors',
+            theme === 'dark'
+              ? 'bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 disabled:opacity-50'
+              : 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-50'
+          )}
+        >
+          {isRunning ? (
+            <>
+              <RefreshCw className="w-4 h-4 animate-spin" />
+              Running...
+            </>
+          ) : (
+            <>
+              <Play className="w-4 h-4" />
+              Run Reasoning
+            </>
+          )}
+        </button>
+      </div>
+
+      {/* Configuration Panel */}
+      <div className={clsx(
+        'rounded-lg border p-4',
+        theme === 'dark' ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'
+      )}>
+        <div className="space-y-4">
+          <div>
+            <label className={clsx('block text-sm font-medium mb-2', theme === 'dark' ? 'text-gray-300' : 'text-gray-700')}>
+              Prompt
+            </label>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              placeholder="Enter your prompt for reasoning..."
+              rows={3}
+              className={clsx(
+                'w-full px-3 py-2 rounded-lg border resize-none',
+                theme === 'dark'
+                  ? 'bg-gray-800 border-gray-700 text-white placeholder-gray-500'
+                  : 'bg-white border-gray-300 text-gray-900 placeholder-gray-400'
+              )}
+            />
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className={clsx('block text-sm font-medium mb-2', theme === 'dark' ? 'text-gray-300' : 'text-gray-700')}>
+                Reasoning Type
+              </label>
+              <div className="flex gap-2">
+                {[
+                  { value: 'tree', label: 'Tree-of-Thought' },
+                  { value: 'graph', label: 'Graph-of-Thought' },
+                  { value: 'multi', label: 'Multi-Path' },
+                ].map((option) => (
+                  <button
+                    key={option.value}
+                    onClick={() => setReasoningType(option.value as any)}
+                    className={clsx(
+                      'px-3 py-2 rounded-lg text-sm font-medium transition-colors',
+                      reasoningType === option.value
+                        ? theme === 'dark'
+                          ? 'bg-emerald-500/20 text-emerald-400'
+                          : 'bg-emerald-100 text-emerald-700'
+                        : theme === 'dark'
+                          ? 'bg-gray-800 text-gray-400 hover:text-white'
+                          : 'bg-gray-100 text-gray-600 hover:text-gray-900'
+                    )}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              {reasoningType !== 'graph' && (
+                <>
+                  <div>
+                    <label className={clsx('block text-xs font-medium mb-1', theme === 'dark' ? 'text-gray-400' : 'text-gray-600')}>
+                      Max Depth: {config.maxDepth}
+                    </label>
+                    <input
+                      type="range"
+                      min="1"
+                      max="5"
+                      value={config.maxDepth}
+                      onChange={(e) => setConfig({ ...config, maxDepth: parseInt(e.target.value) })}
+                      className="w-full"
+                    />
+                  </div>
+                  <div>
+                    <label className={clsx('block text-xs font-medium mb-1', theme === 'dark' ? 'text-gray-400' : 'text-gray-600')}>
+                      Branching Factor: {config.branchingFactor}
+                    </label>
+                    <input
+                      type="range"
+                      min="2"
+                      max="5"
+                      value={config.branchingFactor}
+                      onChange={(e) => setConfig({ ...config, branchingFactor: parseInt(e.target.value) })}
+                      className="w-full"
+                    />
+                  </div>
+                </>
+              )}
+              {reasoningType === 'multi' && (
+                <div>
+                  <label className={clsx('block text-xs font-medium mb-1', theme === 'dark' ? 'text-gray-400' : 'text-gray-600')}>
+                    Number of Paths: {config.numPaths}
+                  </label>
+                  <input
+                    type="range"
+                    min="2"
+                    max="5"
+                    value={config.numPaths}
+                    onChange={(e) => setConfig({ ...config, numPaths: parseInt(e.target.value) })}
+                    className="w-full"
+                  />
+                </div>
+              )}
+              {reasoningType === 'graph' && (
+                <div>
+                  <label className={clsx('block text-xs font-medium mb-1', theme === 'dark' ? 'text-gray-400' : 'text-gray-600')}>
+                    Max Nodes: {config.maxNodes}
+                  </label>
+                  <input
+                    type="range"
+                    min="5"
+                    max="20"
+                    value={config.maxNodes}
+                    onChange={(e) => setConfig({ ...config, maxNodes: parseInt(e.target.value) })}
+                    className="w-full"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Results Panel */}
+      {result && (
+        <div className="space-y-4">
+          {/* Quality Metrics */}
+          {result.qualityMetrics && (
+            <div className={clsx(
+              'rounded-lg border p-4',
+              theme === 'dark' ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'
+            )}>
+              <h3 className={clsx('font-medium mb-4', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                Quality Metrics
+              </h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {Object.entries(result.qualityMetrics).map(([key, value]: [string, any]) => (
+                  <div key={key} className={clsx('p-3 rounded-lg text-center', theme === 'dark' ? 'bg-gray-800' : 'bg-gray-50')}>
+                    <p className={clsx('text-2xl font-bold mb-1', theme === 'dark' ? 'text-emerald-400' : 'text-emerald-600')}>
+                      {(value * 100).toFixed(0)}%
+                    </p>
+                    <p className={clsx('text-xs capitalize', theme === 'dark' ? 'text-gray-400' : 'text-gray-600')}>
+                      {key}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Multi-Path Results */}
+          {result.selection && (
+            <div className={clsx(
+              'rounded-lg border p-4',
+              theme === 'dark' ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'
+            )}>
+              <h3 className={clsx('font-medium mb-4', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                Path Evaluation Results
+              </h3>
+              <div className="space-y-3">
+                {result.selection.allEvaluations.map((evaluation: PathEvaluation, idx: number) => (
+                  <div
+                    key={idx}
+                    className={clsx(
+                      'p-4 rounded-lg border cursor-pointer transition-all',
+                      selectedPath === idx
+                        ? theme === 'dark' ? 'border-emerald-500 bg-emerald-500/10' : 'border-emerald-400 bg-emerald-50'
+                        : theme === 'dark' ? 'border-gray-800 bg-gray-800/50' : 'border-gray-200 bg-gray-50'
+                    )}
+                    onClick={() => setSelectedPath(selectedPath === idx ? null : idx)}
+                  >
+                    <div className="flex items-center justify-between mb-2">
+                      <span className={clsx('font-medium', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                        {evaluation.pathId}
+                      </span>
+                      <span className={clsx(
+                        'px-2 py-1 rounded text-sm font-medium',
+                        theme === 'dark' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-emerald-100 text-emerald-700'
+                      )}>
+                        Score: {(evaluation.score * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    {selectedPath === idx && (
+                      <div className="mt-3 space-y-2">
+                        <p className={clsx('text-sm', theme === 'dark' ? 'text-gray-300' : 'text-gray-700')}>
+                          {evaluation.reasoning}
+                        </p>
+                        {evaluation.strengths.length > 0 && (
+                          <div>
+                            <p className={clsx('text-xs font-medium mb-1', theme === 'dark' ? 'text-green-400' : 'text-green-600')}>
+                              Strengths:
+                            </p>
+                            <ul className="list-disc list-inside space-y-1">
+                              {evaluation.strengths.map((s, i) => (
+                                <li key={i} className={clsx('text-xs', theme === 'dark' ? 'text-gray-400' : 'text-gray-600')}>
+                                  {s}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className={clsx('mt-4 p-3 rounded-lg', theme === 'dark' ? 'bg-emerald-500/10' : 'bg-emerald-50')}>
+                <p className={clsx('text-sm font-medium mb-1', theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700')}>
+                  Selection Reasoning:
+                </p>
+                <p className={clsx('text-sm', theme === 'dark' ? 'text-gray-300' : 'text-gray-700')}>
+                  {result.selection.selectionReasoning}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Reasoning Path Visualization */}
+          {result.reasoningPath && (
+            <div className={clsx(
+              'rounded-lg border p-4',
+              theme === 'dark' ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'
+            )}>
+              <h3 className={clsx('font-medium mb-4', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                Reasoning Path
+              </h3>
+              <div className="space-y-2">
+                {result.reasoningPath.nodes.map((node: any, idx: number) => (
+                  <div
+                    key={idx}
+                    className={clsx(
+                      'p-3 rounded-lg border-l-4',
+                      theme === 'dark' ? 'bg-gray-800 border-emerald-500' : 'bg-gray-50 border-emerald-400'
+                    )}
+                    style={{ marginLeft: `${node.depth * 20}px` }}
+                  >
+                    <div className="flex items-start justify-between mb-1">
+                      <span className={clsx('text-xs font-medium', theme === 'dark' ? 'text-gray-500' : 'text-gray-500')}>
+                        Step {idx + 1} (Depth {node.depth})
+                      </span>
+                      <span className={clsx('text-xs', theme === 'dark' ? 'text-emerald-400' : 'text-emerald-600')}>
+                        Score: {(node.score * 100).toFixed(0)}%
+                      </span>
+                    </div>
+                    <p className={clsx('text-sm', theme === 'dark' ? 'text-gray-300' : 'text-gray-700')}>
+                      {node.content}
+                    </p>
+                  </div>
+                ))}
+              </div>
+              <div className={clsx('mt-4 p-4 rounded-lg', theme === 'dark' ? 'bg-emerald-500/10' : 'bg-emerald-50')}>
+                <p className={clsx('text-sm font-medium mb-2', theme === 'dark' ? 'text-emerald-400' : 'text-emerald-700')}>
+                  Final Answer:
+                </p>
+                <p className={clsx('text-sm', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                  {result.reasoningPath.finalAnswer}
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Execution Metadata */}
+          {result.metadata && (
+            <div className={clsx(
+              'rounded-lg border p-4',
+              theme === 'dark' ? 'bg-gray-900 border-gray-800' : 'bg-white border-gray-200'
+            )}>
+              <h3 className={clsx('font-medium mb-3', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                Execution Metadata
+              </h3>
+              <div className="grid grid-cols-3 gap-4">
+                {result.metadata.executionTime && (
+                  <div>
+                    <p className={clsx('text-xs', theme === 'dark' ? 'text-gray-500' : 'text-gray-500')}>Execution Time</p>
+                    <p className={clsx('text-sm font-medium', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                      {(result.metadata.executionTime / 1000).toFixed(2)}s
+                    </p>
+                  </div>
+                )}
+                {result.metadata.totalNodes && (
+                  <div>
+                    <p className={clsx('text-xs', theme === 'dark' ? 'text-gray-500' : 'text-gray-500')}>Total Nodes</p>
+                    <p className={clsx('text-sm font-medium', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                      {result.metadata.totalNodes}
+                    </p>
+                  </div>
+                )}
+                {result.totalPaths && (
+                  <div>
+                    <p className={clsx('text-xs', theme === 'dark' ? 'text-gray-500' : 'text-gray-500')}>Total Paths</p>
+                    <p className={clsx('text-sm font-medium', theme === 'dark' ? 'text-white' : 'text-gray-900')}>
+                      {result.totalPaths}
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       )}
     </div>
