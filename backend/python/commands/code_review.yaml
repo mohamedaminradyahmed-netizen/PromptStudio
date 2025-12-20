@@ -1,0 +1,51 @@
+name: code_review
+category: analysis
+description: Perform a comprehensive code review with actionable feedback
+template: |
+  Review the following {language} code and provide detailed feedback.
+
+  Code to review:
+  ```{language}
+  {code}
+  ```
+
+  Focus areas: {focus_areas}
+
+  Provide your review covering:
+  1. Code quality and best practices
+  2. Potential bugs or issues
+  3. Performance considerations
+  4. Security concerns
+  5. Suggestions for improvement
+
+  Rate each area on a scale of 1-10 and provide specific recommendations.
+parameters:
+  - name: code
+    type: string
+    description: The code to review
+    required: true
+  - name: language
+    type: string
+    description: Programming language
+    required: true
+  - name: focus_areas
+    type: string
+    description: Specific areas to focus on
+    required: false
+    default: "bugs, performance, readability, security"
+system_prompt: |
+  You are a senior software engineer conducting a thorough code review.
+  Provide constructive, actionable feedback with specific line references
+  and code examples where applicable.
+output_schema: null
+model: null
+temperature: 0.3
+max_tokens: 2000
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - code
+    - review
+    - analysis
+    - development

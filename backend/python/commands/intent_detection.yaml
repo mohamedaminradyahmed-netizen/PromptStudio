@@ -1,0 +1,44 @@
+name: intent_detection
+category: analysis
+description: Detect user intent and extract entities from input
+template: |
+  Analyze the following user input and detect the intent.
+
+  User input:
+  "{input}"
+
+  Context (if any): {context}
+
+  Identify:
+  1. Primary intent (what the user wants to accomplish)
+  2. Secondary intents (if any)
+  3. Entities mentioned (names, dates, locations, etc.)
+  4. Sentiment (positive, negative, neutral)
+  5. Urgency level (low, normal, high, critical)
+  6. Suggested response type
+parameters:
+  - name: input
+    type: string
+    description: The user input to analyze
+    required: true
+  - name: context
+    type: string
+    description: Additional context about the conversation
+    required: false
+    default: "None provided"
+system_prompt: |
+  You are an intent detection system. Analyze user inputs to understand
+  what they want to accomplish and extract relevant information.
+  Be precise and provide confidence scores for your detections.
+output_schema: null
+model: null
+temperature: 0.2
+max_tokens: 1000
+metadata:
+  author: PromptStudio
+  version: "1.0.0"
+  tags:
+    - intent
+    - nlp
+    - entity-extraction
+    - analysis
